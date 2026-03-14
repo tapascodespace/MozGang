@@ -2,6 +2,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from database import supabase
 from models import CreativeBrief
+from services.analysis_service import analyze_video
 
 logger = logging.getLogger("scoreflow.projects")
 
@@ -30,7 +31,7 @@ async def get_project(project_id: str):
 
 @router.post("/projects/{project_id}/brief")
 async def submit_brief(project_id: str, brief: CreativeBrief):
-    """Submit creative brief and trigger analysis pipeline."""
+    """Submit creative brief and trigger analysis pipeline (PRD Section 8)."""
     logger.info(f"[BRIEF] ========== Submitting brief for project {project_id[:8]}... ==========")
     logger.info(f"[BRIEF] Energy: {brief.overall_energy}")
     logger.info(f"[BRIEF] Style: {brief.music_style_direction}")
@@ -60,7 +61,6 @@ async def submit_brief(project_id: str, brief: CreativeBrief):
     for c in clips:
         logger.info(f"[BRIEF]   Clip: {c['filename']} | order={c['clip_order']} | {c['start_time']:.2f}s-{c['end_time']:.2f}s ({c['duration']:.2f}s)")
 
-    # Phase 1: Auto-divide into 3-5 equal sections at clip boundaries
     total_duration = sum(c["duration"] for c in clips)
     logger.info(f"[BRIEF] Total duration: {total_duration:.2f}s")
 
@@ -68,9 +68,25 @@ async def submit_brief(project_id: str, brief: CreativeBrief):
         "total_duration": total_duration
     }).eq("id", project_id).execute()
 
-    sections = _create_mock_sections(project_id, clips, total_duration, brief)
-    logger.info(f"[BRIEF] ========== Brief complete: {len(sections)} sections created ==========")
-    return {"sections": sections, "total_duration": total_duration}
+    # Delete existing sections for this project
+    supabase.table("sections").delete().eq("project_id", project_id).execute()
+    logger.info(f"[BRIEF] Cleared existing sections")
+
+    # Run the analysis pipeline (PRD Section 8.1-8.5)
+    brief_dict = {
+        "overall_energy": brief.overall_energy,
+        "music_style_direction": brief.music_style_direction,
+        "references_text": brief.references_text or "",
+    }
+
+    analysis_result = await analyze_video(clips, brief_dict, project_id)
+    logger.info(f"[BRIEF] Analysis complete: {len(analysis_result.sections)} sections, mode={analysis_result.analysis_mode}")
+
+    # Store sections in database
+    sections = _store_analysis_sections(project_id, clips, analysis_result)
+
+    logger.info(f"[BRIEF] ========== Brief complete: {len(sections)} sections created ({analysis_result.analysis_mode} mode) ==========")
+    return {"sections": sections, "total_duration": total_duration, "analysis_mode": analysis_result.analysis_mode}
 
 
 @router.put("/projects/{project_id}/brief")
@@ -85,60 +101,61 @@ async def update_brief(project_id: str, brief: CreativeBrief):
     return {"status": "updated"}
 
 
-def _create_mock_sections(project_id: str, clips: list, total_duration: float, brief: CreativeBrief):
-    """Phase 1: Auto-divide clips into 3-5 equal sections at clip boundaries."""
-    from config import SECTION_TYPES, MIN_SECTIONS, MAX_SECTIONS
+def _energy_level_to_float(energy_str: str) -> float:
+    """Convert energy level string to float (0.0-1.0) for database compatibility."""
+    mapping = {
+        "Very Low": 0.1,
+        "Low": 0.25,
+        "Medium Low": 0.4,
+        "Medium": 0.5,
+        "Medium High": 0.65,
+        "High": 0.8,
+        "Very High": 0.95,
+    }
+    return mapping.get(energy_str, 0.5)
 
-    logger.info(f"[SECTIONS] Creating mock sections for {len(clips)} clips ({total_duration:.2f}s total)")
 
-    # Delete existing sections for this project
-    supabase.table("sections").delete().eq("project_id", project_id).execute()
-    logger.info(f"[SECTIONS] Cleared existing sections")
-
-    num_clips = len(clips)
-    num_sections = min(max(MIN_SECTIONS, num_clips), MAX_SECTIONS)
-    num_sections = min(num_sections, num_clips)
-    logger.info(f"[SECTIONS] Target: {num_sections} sections for {num_clips} clips")
-
-    # Distribute clips across sections as evenly as possible
-    clips_per_section = []
-    base = num_clips // num_sections
-    remainder = num_clips % num_sections
-    for i in range(num_sections):
-        clips_per_section.append(base + (1 if i < remainder else 0))
-
-    # Default section types sequence
-    default_types = ["Hook", "Intro", "Build", "Reveal", "Outro"]
-    if num_sections <= len(default_types):
-        section_types = default_types[:num_sections]
-    else:
-        section_types = default_types
-
+def _store_analysis_sections(project_id: str, clips: list, analysis_result) -> list:
+    """
+    Store analysis sections in the database.
+    Assigns clips to sections based on their center point relative to section boundaries.
+    """
     sections = []
-    clip_idx = 0
-    for i in range(num_sections):
-        section_clips = clips[clip_idx:clip_idx + clips_per_section[i]]
-        clip_ids = [c["id"] for c in section_clips]
-        start_time = section_clips[0]["start_time"]
-        end_time = section_clips[-1]["end_time"]
-        duration = end_time - start_time
-        s_type = section_types[i] if i < len(section_types) else "Build"
+
+    for i, section_analysis in enumerate(analysis_result.sections):
+        # Find clips that belong to this section (center point within section boundaries)
+        section_clip_ids = []
+        for clip in clips:
+            clip_center = (clip["start_time"] + clip["end_time"]) / 2
+            if section_analysis.start_time <= clip_center < section_analysis.end_time:
+                section_clip_ids.append(clip["id"])
+
+        # If no clips assigned by center point, assign clips that overlap
+        if not section_clip_ids:
+            for clip in clips:
+                if clip["start_time"] < section_analysis.end_time and clip["end_time"] > section_analysis.start_time:
+                    section_clip_ids.append(clip["id"])
+
+        duration = section_analysis.end_time - section_analysis.start_time
+
+        # Convert energy_level string to float for database
+        energy_float = _energy_level_to_float(section_analysis.energy_level)
 
         section_data = {
             "project_id": project_id,
-            "start_time": start_time,
-            "end_time": end_time,
+            "start_time": section_analysis.start_time,
+            "end_time": section_analysis.end_time,
             "duration": duration,
-            "clip_ids": clip_ids,
-            "section_type": s_type,
-            "scene_type": "Vlog/Casual",
-            "emotional_tone": "Energetic",
-            "pacing": "Medium",
-            "energy_level": 0.5,
-            "cuts_per_second": 0.5,
-            "detected_theme": "Scene analysis pending",
-            "dominant_visual": "Pending",
-            "suggested_music_style": "Style pending — connect AI",
+            "clip_ids": section_clip_ids,
+            "section_type": section_analysis.section_type,
+            "scene_type": section_analysis.scene_type,
+            "emotional_tone": section_analysis.emotional_tone,
+            "pacing": section_analysis.pacing,
+            "energy_level": energy_float,
+            "cuts_per_second": section_analysis.cuts_per_second,
+            "detected_theme": section_analysis.detected_theme,
+            "dominant_visual": section_analysis.dominant_visual,
+            "suggested_music_style": section_analysis.suggested_music_style,
             "music_status": "PENDING",
             "feedback_history": [],
             "section_order": i,
@@ -146,7 +163,10 @@ def _create_mock_sections(project_id: str, clips: list, total_duration: float, b
 
         result = supabase.table("sections").insert(section_data).execute()
         sections.append(result.data[0])
-        logger.info(f"[SECTIONS] ✓ Section {i}: {s_type} | {start_time:.2f}s-{end_time:.2f}s ({duration:.2f}s) | {len(clip_ids)} clips")
-        clip_idx += clips_per_section[i]
+        logger.info(
+            f"[SECTIONS] ✓ Section {i}: {section_analysis.section_type} | "
+            f"{section_analysis.start_time:.2f}s-{section_analysis.end_time:.2f}s ({duration:.2f}s) | "
+            f"{len(section_clip_ids)} clips | {section_analysis.emotional_tone} | energy={energy_float}"
+        )
 
     return sections
