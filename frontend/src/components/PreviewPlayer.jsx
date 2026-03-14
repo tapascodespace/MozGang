@@ -7,10 +7,13 @@ const styles = {
     overflow: 'hidden',
     position: 'relative',
     width: '100%',
+    height: '100%',
+    maxHeight: '45vh',
     aspectRatio: '16/9',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    margin: '0 auto',
   },
   video: {
     width: '100%',

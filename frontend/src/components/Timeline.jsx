@@ -97,11 +97,15 @@ const S = {
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     fontSize: 11,
     color: TOKEN.textBright,
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
   },
   scrollArea: {
     overflowX: 'auto',
     overflowY: 'hidden',
     position: 'relative',
+    flex: 1,
   },
   layerRow: {
     display: 'flex',

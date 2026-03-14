@@ -145,9 +145,9 @@ export default function App() {
       {view === 'workspace' && (
         <>
           <TopBar hasReadyTracks={hasReadyTracks} onExport={handleExport} />
-          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ padding: '16px 20px', flex: '0 0 auto' }}>
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+              <div style={{ padding: '12px 16px', flex: '0 0 auto', maxHeight: '50vh' }}>
                 <PreviewPlayer
                   clips={clips}
                   currentTime={currentTime}
@@ -155,7 +155,7 @@ export default function App() {
                   onPlayStateChange={() => {}}
                 />
               </div>
-              <div style={{ flex: 1, overflow: 'hidden' }}>
+              <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
                 <Timeline
                   clips={clips}
                   sections={sections}

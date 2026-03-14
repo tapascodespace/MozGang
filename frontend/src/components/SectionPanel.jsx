@@ -38,8 +38,9 @@ const EMOTIONAL_TONES = [
 /* ── reusable inline styles ── */
 const styles = {
   root: {
-    width: 320,
-    minWidth: 320,
+    width: '22vw',
+    minWidth: 280,
+    maxWidth: 360,
     height: '100%',
     background: T.bgCard,
     borderLeft: `1px solid ${T.stroke}`,
