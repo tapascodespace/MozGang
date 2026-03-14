@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+uploads/
+frames/
+thumbnails/
+audio/
+exports/
+.DS_Store
+*.egg-info/
+*config.py
