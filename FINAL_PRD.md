@@ -1,4 +1,4 @@
-# ScoreFlow — PRD v3.1
+# ScoreFlow — PRD v4.1
 **Status:** Final for Vibe Coding | **Date:** 14 March 2026 | **Scope:** 24-hour hackathon MVP | **Platform:** Desktop web only
 
 ---
