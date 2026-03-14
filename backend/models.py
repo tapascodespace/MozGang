@@ -23,7 +23,8 @@ class ResizeRequest(BaseModel):
 
 
 class SplitRequest(BaseModel):
-    split_at_clip_id: str
+    split_at_clip_id: Optional[str] = None  # Legacy: split at clip boundary
+    split_at_time: Optional[float] = None   # Split at exact timestamp (seconds)
 
 
 class RegenerateRequest(BaseModel):

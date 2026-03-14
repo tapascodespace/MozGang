@@ -166,7 +166,7 @@ async def resize_section(project_id: str, section_id: str, body: ResizeRequest):
 
 @router.post("/projects/{project_id}/sections/{section_id}/split")
 async def split_section(project_id: str, section_id: str, body: SplitRequest):
-    """Split a section at a clip boundary."""
+    """Split a section at a specific timestamp or clip boundary."""
     section = supabase.table("sections").select("*").eq("id", section_id).execute()
     if not section.data:
         raise HTTPException(status_code=404, detail="Section not found")
@@ -174,22 +174,46 @@ async def split_section(project_id: str, section_id: str, body: SplitRequest):
     s = section.data[0]
     clip_ids = s.get("clip_ids") or []
 
-    if body.split_at_clip_id not in clip_ids:
-        raise HTTPException(status_code=400, detail="Clip not in this section")
+    # Get all clips for this project to compute positions
+    all_clips = supabase.table("clips").select("*").eq(
+        "project_id", project_id
+    ).order("clip_order").execute()
+    clip_map = {c["id"]: c for c in all_clips.data}
 
-    split_idx = clip_ids.index(body.split_at_clip_id)
-    if split_idx == 0:
-        raise HTTPException(status_code=400, detail="Cannot split at first clip")
+    # Determine split time
+    if body.split_at_time is not None:
+        split_time = body.split_at_time
+        # Validate split time is within section bounds
+        if split_time <= s["start_time"] or split_time >= s["end_time"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Split time {split_time:.3f}s must be within section bounds ({s['start_time']:.3f}s - {s['end_time']:.3f}s)"
+            )
+    elif body.split_at_clip_id:
+        # Legacy: split at clip boundary
+        if body.split_at_clip_id not in clip_ids:
+            raise HTTPException(status_code=400, detail="Clip not in this section")
+        split_idx = clip_ids.index(body.split_at_clip_id)
+        if split_idx == 0:
+            raise HTTPException(status_code=400, detail="Cannot split at first clip")
+        split_clip = clip_map[body.split_at_clip_id]
+        split_time = split_clip["start_time"]
+    else:
+        raise HTTPException(status_code=400, detail="Must provide split_at_time or split_at_clip_id")
 
-    # Get clip details for timing
-    clips = supabase.table("clips").select("*").in_("id", clip_ids).order("clip_order").execute()
-    clip_map = {c["id"]: c for c in clips.data}
+    # Assign clips to sections based on their center point
+    first_clip_ids = []
+    second_clip_ids = []
 
-    first_clip_ids = clip_ids[:split_idx]
-    second_clip_ids = clip_ids[split_idx:]
-
-    split_clip = clip_map[body.split_at_clip_id]
-    split_time = split_clip["start_time"]
+    for cid in clip_ids:
+        clip = clip_map.get(cid)
+        if not clip:
+            continue
+        clip_center = (clip["start_time"] + clip["end_time"]) / 2
+        if clip_center < split_time:
+            first_clip_ids.append(cid)
+        else:
+            second_clip_ids.append(cid)
 
     # Get next section type
     current_type = s["section_type"]
