@@ -118,7 +118,8 @@ create table tracks (
   stream_url text,
   duration float,
   generation_prompt text,
-  trimmed_to_fit boolean default false
+  trimmed_to_fit boolean default false,
+  is_discarded boolean default false
 );
 ```
 
@@ -234,16 +235,16 @@ Each section block has a **"Generate ▶"** button.
 
 ### 6.6 Preview Player
 
-Preview uses **server-rendered MP4 files**.
+Preview uses **client-side audio sync** for generated tracks.
 
-When at least one section track is READY, the backend builds a temporary preview MP4 using FFmpeg:
-- Concatenate clips in order
-- Mix READY tracks at their section offsets
-- Silence where tracks are missing
+The frontend plays video clips directly via `<video>` element and syncs generated music via a separate `<audio>` element:
+- Finds the current section based on playhead time
+- Looks up the non-discarded track for that section
+- Plays track audio with correct offset within section
+- Auto-switches tracks when crossing section boundaries
+- Pauses audio when video pauses, syncs on seek
 
-The backend returns a preview URL. The frontend plays it in `<video>`. When a new track becomes READY, the frontend requests a fresh preview.
-
-Sections without a READY track play silence in the preview — this is expected, not an error.
+Sections without a READY track play video with no music — this is expected, not an error.
 
 ### 6.7 Section Panel (Right Sidebar)
 
@@ -287,7 +288,10 @@ If step 4 fails or times out → fallback (§8.3).
 
 ```
 POST   /api/projects                                Create project
+GET    /api/projects/{id}                           Get project details
 POST   /api/projects/{id}/clips                     Upload clips (multipart)
+GET    /api/projects/{id}/clips                     Get all clips
+PUT    /api/projects/{id}/clips/reorder             Reorder clips
 POST   /api/projects/{id}/brief                     Submit brief + trigger analysis
 PUT    /api/projects/{id}/brief                     Update brief (no auto-regen)
 GET    /api/projects/{id}/sections                  Get sections
@@ -295,12 +299,13 @@ PUT    /api/projects/{id}/sections/{sid}            Update section_type / emotio
 POST   /api/projects/{id}/sections/{sid}/generate   Trigger music generation
 POST   /api/projects/{id}/sections/{sid}/regenerate Regenerate with feedback
 POST   /api/projects/{id}/sections/merge            Merge two sections
-POST   /api/projects/{id}/sections/{sid}/split      Split at clip boundary
+POST   /api/projects/{id}/sections/{sid}/split      Split at time or clip boundary
+POST   /api/projects/{id}/sections/{sid}/undo       Restore most recent discarded track
 GET    /api/projects/{id}/clips/{cid}/stream        Stream clip for preview
-POST   /api/projects/{id}/preview                   Build preview MP4, return URL
+GET    /api/projects/{id}/tracks                    Get all non-discarded tracks
+GET    /api/projects/{id}/tracks/{tid}/download     Download individual track
 POST   /api/projects/{id}/export                    Full export
 GET    /api/projects/{id}/export/download           Download MP4
-GET    /api/projects/{id}/tracks/{tid}/download     Download individual track
 ```
 
 **Clip upload rules:** max 1 GB. Videos >4 min accepted; only first 240s used for analysis. Returns `id`, `duration`, `thumbnail_urls`, `start_time`, `end_time`.
@@ -321,7 +326,8 @@ class MergeRequest(BaseModel):
     section_ids: List[str]  # exactly 2, adjacent
 
 class SplitRequest(BaseModel):
-    split_at_clip_id: str
+    split_at_clip_id: Optional[str] = None  # Legacy: split at clip boundary
+    split_at_time: Optional[float] = None   # Split at exact timestamp (seconds)
 
 class RegenerateRequest(BaseModel):
     feedback: str
@@ -501,8 +507,10 @@ Body: `{ section_ids: [id1, id2] }` — must be adjacent.
 
 ### 9.2 Split (`POST /api/projects/{id}/sections/{sid}/split`)
 
-Body: `{ split_at_clip_id }` — clip boundary only.
+Body: `{ split_at_time }` or `{ split_at_clip_id }` — exact timestamp (seconds) or clip boundary.
 
+- `split_at_time` takes precedence if both provided
+- Clips assigned to sections based on their center point relative to split time
 - Earlier half: keeps original `section_type` and `emotional_tone`
 - Later half: next `section_type` in sequence (if Outro → stays Outro)
 - Both halves inherit `scene_type`, `energy_level`, `pacing`

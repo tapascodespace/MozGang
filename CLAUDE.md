@@ -80,9 +80,18 @@ Full UI with mocked AI:
 - Merge/split fully working
 
 ### Phase 2 (IN PROGRESS)
-Two parallel branches working against shared interface:
 
-#### Branch: `feature/sentiment-analysis`
+#### Music Generation (COMPLETE - merged to main)
+Implemented in `backend/services/music_service.py`:
+- ElevenLabs Sound Generation API (PRD Section 8.6)
+- Queuing with semaphore + exponential backoff (PRD Section 8.7)
+- FFmpeg trimming to exact section duration
+- Long section handling (>30s split into chunks)
+- Frontend audio playback synced with video preview
+
+**Entry point:** `generate_music_for_section(section, brief, project_id) -> GeneratedTrack`
+
+#### Branch: `feature/sentiment-analysis` (IN PROGRESS)
 Implements video analysis in `backend/services/analysis_service.py`:
 - Frame extraction with FFmpeg (PRD Section 8.1)
 - Cut density computation (PRD Section 8.2)
@@ -91,15 +100,6 @@ Implements video analysis in `backend/services/analysis_service.py`:
 - Fallback logic when AI fails (PRD Section 8.5)
 
 **Entry point:** `analyze_video(clips, brief, project_id) -> FullAnalysisResult`
-
-#### Branch: `feature/music-generation`
-Implements music generation in `backend/services/music_service.py`:
-- ElevenLabs Sound Generation API (PRD Section 8.6)
-- Queuing with semaphore + exponential backoff (PRD Section 8.7)
-- FFmpeg trimming to exact section duration
-- Long section handling (>30s split into chunks)
-
-**Entry point:** `generate_music_for_section(section, brief, project_id) -> GeneratedTrack`
 
 ---
 
@@ -143,6 +143,45 @@ def build_music_prompt(section, brief):
     if section.feedback_history:
         parts.append("User direction: " + ". ".join(section.feedback_history))
     return " ".join(parts)
+```
+
+---
+
+## API Endpoints
+
+All endpoints prefixed with `/api/`:
+
+```
+# Projects
+POST   /projects                           Create project
+GET    /projects/{id}                      Get project details
+
+# Clips
+POST   /projects/{id}/clips                Upload clips (multipart)
+GET    /projects/{id}/clips                Get all clips
+PUT    /projects/{id}/clips/reorder        Reorder clips
+GET    /projects/{id}/clips/{cid}/stream   Stream clip URL
+
+# Brief
+POST   /projects/{id}/brief                Submit brief + trigger analysis
+PUT    /projects/{id}/brief                Update brief (no auto-regen)
+
+# Sections
+GET    /projects/{id}/sections             Get sections
+PUT    /projects/{id}/sections/{sid}       Update section_type / emotional_tone
+POST   /projects/{id}/sections/{sid}/generate    Trigger music generation
+POST   /projects/{id}/sections/{sid}/regenerate  Regenerate with feedback
+POST   /projects/{id}/sections/merge       Merge two adjacent sections
+POST   /projects/{id}/sections/{sid}/split Split at time or clip boundary
+POST   /projects/{id}/sections/{sid}/undo  Restore discarded track
+
+# Tracks
+GET    /projects/{id}/tracks               Get all non-discarded tracks
+GET    /projects/{id}/tracks/{tid}/download  Download track audio
+
+# Export
+POST   /projects/{id}/export               Full export
+GET    /projects/{id}/export/download      Download MP4
 ```
 
 ---
