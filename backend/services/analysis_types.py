@@ -102,16 +102,38 @@ class CreativeBrief(BaseModel):
 # MUSIC GENERATION (PRD Section 8.6)
 # ============================================================================
 
+def _float_to_energy_level(energy: float | str) -> str:
+    """Convert energy level float back to string for prompts."""
+    if isinstance(energy, str):
+        return energy
+    if energy <= 0.15:
+        return "Very Low"
+    elif energy <= 0.3:
+        return "Low"
+    elif energy <= 0.45:
+        return "Medium Low"
+    elif energy <= 0.55:
+        return "Medium"
+    elif energy <= 0.7:
+        return "Medium High"
+    elif energy <= 0.85:
+        return "High"
+    else:
+        return "Very High"
+
+
 def build_music_prompt(section: dict, brief: dict) -> str:
     """
     Build music generation prompt from section analysis and user brief.
     Matches exactly PRD Section 8.6.
     """
+    energy_level = _float_to_energy_level(section.get('energy_level', 0.5))
+
     parts = [
         brief.get("music_style_direction", ""),
         brief.get("overall_energy", ""),
         f"Section: {section.get('section_type', 'Build')}. Scene: {section.get('scene_type', 'Vlog/Casual')}.",
-        f"Mood: {section.get('emotional_tone', 'Energetic')}. Energy: {section.get('energy_level', 'Medium')}. Pacing: {section.get('pacing', 'Medium')}.",
+        f"Mood: {section.get('emotional_tone', 'Energetic')}. Energy: {energy_level}. Pacing: {section.get('pacing', 'Medium')}.",
         f"Style: {section.get('suggested_music_style', '')}.",
     ]
     if brief.get("references_text"):
