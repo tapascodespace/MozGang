@@ -1,1148 +1,592 @@
-# **ScoreFlow --- PRD v3.0**
+# ScoreFlow — PRD v4.1
+**Status:** Final for Vibe Coding | **Date:** 14 March 2026 | **Scope:** 24-hour hackathon MVP | **Platform:** Desktop web only
 
-**Status:** Final for Vibe Coding \| **Date:** 14 March 2026 \|
-**Scope:** 24-hour hackathon MVP \| **Platform:** Desktop web only
+---
 
-## **1. One-Liner**
+## 1. One-Liner
+Drop your video clips. The AI reads the story. The music writes itself — per section, not per video.
 
-Drop your video clips. The AI reads the story. The music writes itself
---- per section, not per video.
+---
 
-## **2. Tech Stack**
+## 2. Tech Stack
 
-  -----------------------------------------------------------------------
-  **Decision**         **Answer**
-  -------------------- --------------------------------------------------
-  Backend              **Python + FastAPI**
+| Decision | Answer |
+|---|---|
+| Backend | Python + FastAPI |
+| Frontend | React (desktop web only) |
+| Database | Supabase (Postgres + Storage) |
+| Music generation | ElevenLabs `/v1/sound-generation` |
+| Transcription | ElevenLabs `/v1/speech-to-text` |
+| Vision | OpenAI GPT-4o |
+| Video processing | FFmpeg (server-side only) |
+| Realtime | Supabase Realtime |
+| Export | MP4 (H.264 + AAC) |
+| Preview | Server-rendered preview MP4 |
+| Queuing | `asyncio.Semaphore` + exponential backoff |
 
-  Frontend             **React** (desktop web only)
+---
 
-  Database             **Supabase** (Postgres + Storage)
+## 3. Config (`config.py`)
 
-  Music generation     ElevenLabs Sound Generation (POST
-                       /v1/sound-generation)
-
-  Transcription        ElevenLabs Speech to Text (POST
-                       /v1/speech-to-text)
-
-  Vision / analysis    OpenAI GPT-4o Vision
-
-  Audio/video          FFmpeg (server-side only)
-  processing           
-
-  Realtime updates     Supabase Realtime (replaces WebSocket)
-
-  Export format        MP4 (H.264 + AAC)
-
-  Preview playback     Client-side audio sync (no server MP4 assembly for
-                       preview)
-
-  Queuing              asyncio.Semaphore + exponential backoff
-  -----------------------------------------------------------------------
-
-## **3. Config (config.py)**
-
-Single file. All keys live here. Never hardcode strings elsewhere.
-
-# config.py
-
+```python
 import os
 
-PRODUCT_NAME = os.getenv(\"PRODUCT_NAME\", \"ScoreFlow\")
+PRODUCT_NAME = os.getenv("PRODUCT_NAME", "ScoreFlow")
 
-ELEVENLABS_API_KEY = \"sk-elevenlabs-PASTE_KEY_HERE\"
+ELEVENLABS_API_KEY = "sk-elevenlabs-PASTE_KEY_HERE"
+OPENAI_API_KEY    = "sk-openai-PASTE_KEY_HERE"
 
-OPENAI_API_KEY = \"sk-openai-PASTE_KEY_HERE\"
+SUPABASE_URL      = "https://bznswadiiqulyzpkajqp.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ6bnN3YWRpaXF1bHl6cGthanFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE3NjQzMjQsImV4cCI6MjA3NzM0MDMyNH0.AkVhwJUNM1NKGjR4b5qjEjAfNkszVpqE4TYK7qwxmVM"
 
-SUPABASE_URL = \"https://bznswadiiqulyzpkajqp.supabase.co\"
+ELEVENLABS_BASE_URL = "https://api.elevenlabs.io"
+OPENAI_BASE_URL     = "https://api.openai.com/v1"
 
-SUPABASE_ANON_KEY =
-\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ6bnN3YWRpaXF1bHl6cGthanFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE3NjQzMjQsImV4cCI6MjA3NzM0MDMyNH0.AkVhwJUNM1NKGjR4b5qjEjAfNkszVpqE4TYK7qwxmVM\"
+FFMPEG_PATH      = "ffmpeg"
+UPLOAD_DIR       = "./uploads"
+FRAMES_DIR       = "./frames"
+THUMBNAILS_DIR   = "./thumbnails"
+AUDIO_DIR        = "./audio"
+EXPORT_DIR       = "./exports"
+PREVIEW_DIR      = "./previews"
 
-ELEVENLABS_BASE_URL = \"https://api.elevenlabs.io\"
-
-OPENAI_BASE_URL = \"https://api.openai.com/v1\"
-
-FFMPEG_PATH = \"ffmpeg\"
-
-UPLOAD_DIR = \"./uploads\"
-
-FRAMES_DIR = \"./frames\" \# analysis frames (1fps, 256x144)
-
-THUMBNAILS_DIR = \"./thumbnails\" \# timeline strip frames (128x72)
-
-AUDIO_DIR = \"./audio\"
-
-EXPORT_DIR = \"./exports\"
-
-MAX_CLIP_ANALYSIS_SECONDS = 240 \# first 4 min per clip used for
-analysis
-
-MAX_TOTAL_DURATION_SECONDS = 600
-
-MAX_SECTIONS = 5
-
-MIN_SECTIONS = 3
-
-MUSIC_QUEUE_CONCURRENCY = 2
-
-MUSIC_RETRY_MAX = 3
-
+MAX_CLIP_ANALYSIS_SECONDS = 240
+MAX_SECTIONS              = 5
+MIN_SECTIONS              = 3
+MUSIC_QUEUE_CONCURRENCY   = 2
+MUSIC_RETRY_MAX           = 3
 MUSIC_RETRY_BASE_DELAY_MS = 1000
-
-MUSIC_DURATION_RETRY_PADDING_SECONDS = 2.0
-
-MAX_ANALYSIS_FRAMES = 120 \# cap at 120 frames regardless of video
-length
+MAX_ANALYSIS_FRAMES       = 120
 
 PORT = 8000
+```
 
-PRODUCT_NAME is used everywhere the product name appears: top bar,
-import screen, page title, export metadata. **Never hardcode the string
---- always read from config.**
+`PRODUCT_NAME` must be used everywhere the product name appears. Never hardcode the string.
 
-## **4. Data Model**
+---
 
-### **4.1 Supabase Schema**
+## 4. Database Schema (Supabase)
 
-****\-- projects
-
+```sql
 create table projects (
-
-id uuid primary key default gen_random_uuid(),
-
-created_at timestamptz default now(),
-
-total_duration float default 0,
-
-overall_energy text,
-
-music_style_direction text,
-
-references_text text
-
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz default now(),
+  total_duration float default 0,
+  overall_energy text,
+  music_style_direction text,
+  references_text text,
+  analysis_mode text default 'AI'  -- 'AI' | 'FALLBACK'
 );
-
-\-- clips
 
 create table clips (
-
-id uuid primary key default gen_random_uuid(),
-
-project_id uuid references projects(id) on delete cascade,
-
-filename text,
-
-storage_path text, \-- Supabase Storage path
-
-start_time float, \-- absolute position in assembled timeline (seconds)
-
-end_time float,
-
-duration float,
-
-clip_order int, \-- 0-indexed
-
-thumbnail_urls jsonb \-- array of thumbnail strip URLs from Supabase
-Storage
-
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid references projects(id) on delete cascade,
+  filename text,
+  storage_path text,
+  start_time float,
+  end_time float,
+  duration float,
+  clip_order int,
+  thumbnail_urls jsonb
 );
-
-\-- sections
 
 create table sections (
-
-id uuid primary key default gen_random_uuid(),
-
-project_id uuid references projects(id) on delete cascade,
-
-start_time float,
-
-end_time float,
-
-duration float,
-
-clip_ids jsonb, \-- ordered array of clip UUIDs
-
-section_type text,
-
-scene_type text,
-
-emotional_tone text,
-
-pacing text,
-
-energy_level float,
-
-cuts_per_second float,
-
-detected_theme text,
-
-dominant_visual text,
-
-suggested_music_style text,
-
-music_status text default \'PENDING\', \-- PENDING \| GENERATING \|
-READY \| FAILED
-
-feedback_history jsonb default \'\[\]\',
-
-section_order int
-
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid references projects(id) on delete cascade,
+  start_time float,
+  end_time float,
+  duration float,
+  clip_ids jsonb,
+  section_type text,
+  scene_type text,
+  emotional_tone text,
+  pacing text,
+  energy_level text,
+  cuts_per_second float,
+  detected_theme text,
+  dominant_visual text,
+  suggested_music_style text,
+  music_status text default 'PENDING',  -- PENDING | GENERATING | READY | FAILED
+  feedback_history jsonb default '[]',
+  section_order int
 );
-
-\-- tracks
 
 create table tracks (
-
-id uuid primary key default gen_random_uuid(),
-
-section_id uuid references sections(id) on delete cascade,
-
-storage_path text,
-
-stream_url text,
-
-duration float,
-
-requested_duration float,
-
-bpm float,
-
-mood_tags jsonb,
-
-generation_prompt text,
-
-was_retried boolean default false,
-
-trimmed_to_fit boolean default false,
-
-is_discarded boolean default false \-- true = this is a discardedTrack
-
+  id uuid primary key default gen_random_uuid(),
+  section_id uuid references sections(id) on delete cascade,
+  storage_path text,
+  stream_url text,
+  duration float,
+  generation_prompt text,
+  trimmed_to_fit boolean default false
 );
+```
 
-### **4.2 Section Attributes**
+---
 
-**User-editable:** section_type, emotional_tone\
-**AI-detected (read-only in UI):** scene_type, pacing, energy_level,
-detected_theme, dominant_visual, suggested_music_style\
-**System-derived:** start_time, end_time, duration, cuts_per_second
+## 5. Enums
 
-### **4.3 Enums**
+```python
+SECTION_TYPES  = ["Hook","Intro","Setup","Build","Anticipation","Reveal",
+                  "Reaction","Demonstration","Montage","Transition","Recap",
+                  "Climax","Cooldown","Testimonial","CTA","Outro"]
 
-****\# These are the only valid values. AI must return from these sets.
+SCENE_TYPES    = ["Talking Head","Walk and Talk","Travel Montage","Product Showcase",
+                  "Tutorial","Action Moment","Crowd/Event","Reaction Shot",
+                  "Environment B-roll","Cinematic Shot","Interview","Screen Recording",
+                  "Timelapse","Food/Cooking","Before/After","Aerial/Drone",
+                  "Close-up Detail","Text/Graphics","Vlog/Casual","Performance",
+                  "Unboxing","Split Screen","POV/First Person","Slow Motion",
+                  "Night/Low Light","Nature/Wildlife","Workout/Fitness","Behind the Scenes"]
 
-SECTION_TYPES = \[
+EMOTIONAL_TONES = ["Energetic","Playful","Suspenseful","Inspirational","Dramatic",
+                   "Emotional","Calm","Informative","Nostalgic","Mysterious",
+                   "Triumphant","Melancholic","Romantic","Epic","Quirky",
+                   "Aggressive","Dreamy","Dark","Confident","Humorous",
+                   "Uplifting","Tense","Bittersweet","Rebellious","Serene",
+                   "Whimsical","Gritty","Hopeful","Eerie","Empowering"]
 
-\"Hook\", \"Intro\", \"Setup\", \"Build\", \"Anticipation\", \"Reveal\",
+PACING         = ["Very Slow","Slow","Medium","Fast","Very Fast"]
+ENERGY_LEVELS  = ["Very Low","Low","Medium Low","Medium","Medium High","High","Very High"]
+MUSIC_STATUS   = ["PENDING","GENERATING","READY","FAILED"]
+```
 
-\"Reaction\", \"Demonstration\", \"Montage\", \"Transition\", \"Recap\",
+AI must return values from these exact lists. No other values are valid.
 
-\"Climax\", \"Cooldown\", \"Testimonial\", \"CTA\", \"Outro\"
+---
 
-\]
+## 6. UI
 
-SCENE_TYPES = \[
+### 6.1 Design Tokens
 
-\"Talking Head\", \"Walk and Talk\", \"Travel Montage\", \"Product
-Showcase\",
-
-\"Tutorial\", \"Action Moment\", \"Crowd/Event\", \"Reaction Shot\",
-
-\"Environment B-roll\", \"Cinematic Shot\", \"Interview\", \"Screen
-Recording\",
-
-\"Timelapse\", \"Food/Cooking\", \"Before/After\", \"Aerial/Drone\",
-
-\"Close-up Detail\", \"Text/Graphics\", \"Vlog/Casual\",
-\"Performance\",
-
-\"Unboxing\", \"Split Screen\", \"POV/First Person\", \"Slow Motion\",
-
-\"Night/Low Light\", \"Nature/Wildlife\", \"Workout/Fitness\", \"Behind
-the Scenes\"
-
-\]
-
-EMOTIONAL_TONES = \[
-
-\"Energetic\", \"Playful\", \"Suspenseful\", \"Inspirational\",
-\"Dramatic\",
-
-\"Emotional\", \"Calm\", \"Informative\", \"Nostalgic\", \"Mysterious\",
-
-\"Triumphant\", \"Melancholic\", \"Romantic\", \"Epic\", \"Quirky\",
-
-\"Aggressive\", \"Dreamy\", \"Dark\", \"Confident\", \"Humorous\",
-
-\"Uplifting\", \"Tense\", \"Bittersweet\", \"Rebellious\", \"Serene\",
-
-\"Whimsical\", \"Gritty\", \"Hopeful\", \"Eerie\", \"Empowering\"
-
-\]
-
-PACING = \[\"Very Slow\", \"Slow\", \"Medium\", \"Fast\", \"Very
-Fast\"\]
-
-ENERGY_LEVELS = \[\"Very Low\", \"Low\", \"Medium Low\", \"Medium\",
-\"Medium High\", \"High\", \"Very High\"\]
-
-MUSIC_STATUS = \[\"PENDING\", \"GENERATING\", \"READY\", \"FAILED\"\]
-
-
-
-## **5. UI Layout & Design System**
-
-### **5.1 Design Tokens (PAX-inspired, adapted for ScoreFlow)**
-
-****:root {
-
-\--bg: #0b0c10;
-
-\--bg-card: #13151a;
-
-\--stroke: rgba(255,255,255,0.08);
-
-\--ink: #ffffff;
-
-\--muted: rgba(255,255,255,0.6);
-
-\--muted-2: rgba(255,255,255,0.4);
-
-\--muted-3: rgba(255,255,255,0.25);
-
-\--accent: #45f5c5; /\* green-cyan --- music/creative feel \*/
-
-\--accent-dim: rgba(69,245,197,0.12);
-
-\--danger: #f87171;
-
-\--amber: #F5A623;
-
-\--section-pending: #2a2a2a;
-
-\--section-generating: #F5A623;
-
+```css
+:root {
+  --bg:         #0b0c10;
+  --bg-card:    #13151a;
+  --stroke:     rgba(255,255,255,0.08);
+  --ink:        #ffffff;
+  --muted:      rgba(255,255,255,0.6);
+  --accent:     #45f5c5;
+  --accent-dim: rgba(69,245,197,0.12);
+  --danger:     #f87171;
+  --amber:      #F5A623;
 }
+```
 
-**Typography:** Display font --- DM Serif Display or Playfair Display.
-Body --- IBM Plex Mono or DM Sans. Never Inter, Roboto, or Arial.
+Font: `DM Serif Display` for headings, `IBM Plex Mono` for labels. Never Inter/Roboto/Arial.
 
-**Dark theme throughout.** All backgrounds var(\--bg) or
-var(\--bg-card). Cards use border: 1px solid var(\--stroke) with
-border-radius: 12px.
+### 6.2 Import Screen
 
-### **5.2 Import Screen**
+Full-screen drop zone. Header = `PRODUCT_NAME`. Accept MP4/MOV/WebM. On drop → upload to Supabase Storage → ffprobe metadata → return Clips → show Creative Brief modal.
 
--   Full-screen centered drop zone on var(\--bg)
+"Paste YouTube/TikTok URL" field is disabled with tooltip "Coming soon."
 
--   Header: {PRODUCT_NAME} from config
+### 6.3 Creative Brief Modal
 
--   Subtext: \"Drop your video clips here\"
+Shown after upload. Questions 1 and 2 are required.
 
--   Accepted: MP4, MOV, WebM --- up to 10 minutes total
+1. "What energy should the video have overall?" → `overall_energy` (required)
+2. "What music style do you want?" → `music_style_direction` (required)
+3. "Any references or inspiration?" → `references_text` (optional)
 
--   Multi-file drop supported
+Submit: **"Score My Video →"** triggers the analysis pipeline.
 
--   \"Paste YouTube/TikTok URL\" field: **disabled, greyed out**,
-    > tooltip \"Coming soon\"
+### 6.4 Workspace Layout
 
--   On drop → validate → upload to Supabase Storage → server runs
-    > ffprobe → return Clip objects → show Creative Brief modal
+```
+┌─────────────────────────────────────────────────────────┐
+│ TOP BAR: [ScoreFlow]    [How It Works]    [Export]       │
+├───────────────────────────────┬─────────────────────────┤
+│ PREVIEW PLAYER (<video>)      │ SECTION PANEL           │
+│ play/pause, scrub, time       │ (right sidebar)         │
+│ Plays server preview MP4      │ visible when section    │
+├───────────────────────────────┤ is selected             │
+│ TIMELINE                      │                         │
+│  VIDEO    [thumbnail strips]  │                         │
+│  SECTIONS [colour blocks]     │                         │
+│  MUSIC    [track blocks]      │                         │
+│  [+ Add Clips]   [Zoom +/-]   │                         │
+└───────────────────────────────┴─────────────────────────┘
+```
 
-### **5.3 Creative Brief Modal (post-upload)**
+### 6.5 Timeline Layers
 
-Appears after clips upload. Cannot be skipped (questions 1 and 2
-required).
+**Video layer:** thumbnail strip per clip (`thumbnail_urls`), proportional width. Clips separated by 1px divider.
 
-  --------------------------------------------------------------------------------------
-  **\#**   **Question**                           **Field**               **Required**
-  -------- -------------------------------------- ----------------------- --------------
-  1        \"What energy should the video have    overall_energy          Yes
-           overall?\"                                                     
+**Sections layer:** colour-coded blocks. Click to select. Context menu: merge adjacent, split at clip boundary.
+```
+Hook=#FF6B6B  Intro=#4A90D9   Setup=#8B9DC3   Build=#F5A623
+Reveal=#D0021B Reaction=#FF85A2 Demonstration=#50C878 Montage=#9B59B6
+Recap=#3498DB  Climax=#C0392B  Cooldown=#1ABC9C CTA=#E74C3C  Outro=#9013FE
+```
 
-  2        \"What music style do you want?\"      music_style_direction   Yes
+**Music layer:** one block per section, same width as section.
+- `PENDING` → grey `#2a2a2a`, dashed, "Waiting..."
+- `GENERATING` → amber `#F5A623`, CSS pulse 1.5s, "Generating..."
+- `READY` → section colour, mini waveform, play icon
+- `FAILED` → red `#D0021B`, retry icon
 
-  3        \"Any references or inspiration?\"     references_text         No
-  --------------------------------------------------------------------------------------
+Each section block has a **"Generate ▶"** button.
 
-Submit button: **\"Score My Video →\"** --- triggers the analysis
-pipeline.
+**Playhead:** red `#FF0000`, 2px, spans all layers. Draggable. Syncs to `<video>.currentTime`.
 
-### **5.4 Workspace Layout**
+**Zoom:** default 10px/sec, min 2, max 100. Clamp always.
 
-****┌─────────────────────────────────────────────────────────────────┐
+### 6.6 Preview Player
 
-│ TOP BAR │
+Preview uses **server-rendered MP4 files**.
 
-│ \[ScoreFlow\] \[How It Works\] \[Export (video+audio)\] │
+When at least one section track is READY, the backend builds a temporary preview MP4 using FFmpeg:
+- Concatenate clips in order
+- Mix READY tracks at their section offsets
+- Silence where tracks are missing
 
-├───────────────────────────────────────────┬─────────────────────┤
+The backend returns a preview URL. The frontend plays it in `<video>`. When a new track becomes READY, the frontend requests a fresh preview.
 
-│ PREVIEW PLAYER │ SECTION PANEL │
+Sections without a READY track play silence in the preview — this is expected, not an error.
 
-│ \<video\> element, plays clips in order │ right sidebar, │
+### 6.7 Section Panel (Right Sidebar)
 
-│ Standard controls: play/pause, scrub │ visible when a │
+- **No section selected:** "Select a section on the timeline."
+- **During analysis:** skeleton placeholder blocks.
+- **Section selected:**
+  - Creative Brief summary (collapsible, editable — does NOT auto-regenerate)
+  - `section_type` dropdown (user-editable)
+  - `scene_type` badge (read-only)
+  - `emotional_tone` dropdown (user-editable)
+  - `detected_theme`, `dominant_visual`, `suggested_music_style` (read-only)
+  - `energy_level`, `pacing` badges (read-only)
+  - **Generate Music** button (disabled while GENERATING)
+  - **Regenerate** button (visible when READY)
+  - Feedback input → appended to `feedback_history` on regenerate
+  - Track info when READY: duration, `trimmed_to_fit` indicator
 
-│ Generates audio on client via Web Audio │ section is selected│
+### 6.8 Top Bar
 
-│ API layered over video │ │
+- Left: `PRODUCT_NAME`
+- Center: "How It Works" → 3-step modal (Import → Describe → Score)
+- Right: "Export" — disabled until ≥1 section is READY
 
-├───────────────────────────────────────────┤ │
+### 6.9 Progress Indicator
 
-│ TIMELINE (3 layers) │ │
-
-│ VIDEO \[thumbnail strip per clip\] │ │
-
-│ SECTIONS \[colour-coded blocks\] │ │
-
-│ MUSIC \[track blocks per section\] │ │
-
-│ \[+ Add Clips\] \[Zoom +/-\] │ │
-
-└───────────────────────────────────────────┴─────────────────────┘
-
-### **5.5 Timeline --- Three Layers**
-
-**Video Layer**
-
--   One thumbnail strip per clip from thumbnail_urls
-
--   Proportional width to duration
-
--   Clips separated by 1px divider at 50% opacity
-
--   Hover: show frame at cursor timestamp
-
--   Drag to reorder → PUT /api/projects/:id/clips/reorder
-
-**Sections Layer**
-
--   Colour-coded blocks by section_type:
-
-Hook=#FF6B6B, Intro=#4A90D9, Setup=#8B9DC3,
-Build=#F5A623Anticipation=#E8871E, Reveal=#D0021B,
-Reaction=#FF85A2Demonstration=#50C878, Montage=#9B59B6,
-Transition=#95A5A6Recap=#3498DB, Climax=#C0392B,
-Cooldown=#1ABC9CTestimonial=#F39C12, CTA=#E74C3C, Outro=#9013FE
-
--   Section boundaries snap to clip boundaries only
-
--   Click → selects, opens Section Panel
-
--   Drag boundary → resize (snaps to clip edges)
-
--   Context menu or UI button → merge adjacent sections
-
--   Context menu or UI button → split at clip boundary
-
-**Music Layer**
-
--   One block per section, same width as section
-
--   States:
-
-    -   PENDING: grey #2a2a2a, dashed border, \"Waiting\...\"
-
-    -   GENERATING: amber #F5A623, CSS pulse animation 1.5s ease-in-out
-        > infinite, \"Generating\...\"
-
-    -   READY: section colour, mini waveform, play icon
-
-    -   FAILED: red #D0021B, retry icon, \"Failed --- retry\"
-
--   Each section block has a **\"Generate ▶\"** button directly
-    > below/inside it
-
-**Playhead**
-
--   Red #FF0000, 2px vertical line spanning all layers
-
--   Draggable for scrubbing
-
--   Syncs to \<video\>.currentTime
-
-**Zoom**
-
--   zoomLevel default: 10px/sec, min: 2, max: 100
-
--   Clamp on all zoom interactions
-
-### **5.6 Preview Player --- Client-Side Audio Sync**
-
-Preview is **not** server-assembled. The frontend handles it.
-
--   The \<video\> element plays the clips sequentially (or a
-    > concatenated stream URL if backend provides one)
-
--   For each section with music_status === \'READY\': fetch the track\'s
-    > stream_url and play it via the **Web Audio API** at the correct
-    > startTime offset relative to \<video\>.currentTime
-
--   Sections without a READY track play silence --- **no \<audio\>
-    > element is mounted for that range; this is expected, not an
-    > error**
-
--   Playhead on timeline syncs to \<video\>.currentTime
-
--   Seeking on timeline → set \<video\>.currentTime
-
-### **5.7 Section Panel (Right Sidebar)**
-
-**When no section selected:** centered text \"Select a section on the
-timeline.\"\
-**During analysis (no sections yet):** skeleton placeholder blocks.\
-**When section selected but AI fields not yet populated:** show
-placeholder text per §8.
-
-From top to bottom:
-
-1.  **Creative Brief Summary** (collapsible)
-
-    -   Truncated preview of 3 brief answers
-
-    -   \"Edit Brief\" link → editable fields
-
-    -   Editing brief does NOT auto-regenerate tracks
-
-2.  **Section Details\
-    > **
-
-    -   section_type --- dropdown (all 16 values), user-editable
-
-    -   scene_type --- read-only badge
-
-    -   emotional_tone --- dropdown (all 30 values), user-editable
-
-    -   detected_theme --- read-only
-
-    -   dominant_visual --- read-only
-
-    -   suggested_music_style --- read-only
-
-    -   energy_level --- read-only badge
-
-    -   pacing --- read-only badge
-
-3.  **Generate Music** button --- disabled while music_status ===
-    > \'GENERATING\'
-
-4.  **Regenerate** button --- visible when music_status === \'READY\'
-
-5.  **Feedback input** --- placeholder \"Make it more tense, add
-    > strings\...\" --- appended to feedback_history on regenerate
-
-6.  **Track info** (when READY) --- duration, bpm, mood tags as pills,
-    > trimmedToFit indicator
-
-### **5.8 Top Bar**
-
--   Left: {PRODUCT_NAME} from config
-
--   Center: \"How It Works\" → modal, 3 steps: Import → Describe → Score
-
--   Right: \"Export\" button --- disabled until ≥1 section has
-    > music_status === \'READY\'
-
-### **5.9 Progress Indicator (During Analysis)**
-
-Modal overlay with 4 steps (driven by Supabase Realtime events):
-
-1.  \"Uploading clips\...\"
-
-2.  \"Extracting frames\...\" (parallel with step 3)
-
-3.  \"Transcribing audio\...\" (parallel with step 2)
-
-4.  \"Analysing video structure\...\"
-
-If step 4 fails or times out at 35s → show \"Using automatic
-segmentation\" → proceed with fallback (§7.3).
-
-## **6. Backend API (FastAPI)**
-
-### **6.1 Endpoints**
-
-****POST /api/projects Create project
-
-POST /api/projects/{id}/clips Upload clips (multipart)
-
-PUT /api/projects/{id}/clips/reorder Reorder clips {clip_ids: \[\]}
-
-POST /api/projects/{id}/brief Submit brief + trigger analysis
-
-PUT /api/projects/{id}/brief Update brief (no auto-regen)
-
-GET /api/projects/{id}/sections Get sections
-
-PUT /api/projects/{id}/sections/{sid} Update section fields
-
-POST /api/projects/{id}/sections/{sid}/generate Trigger music generation
-
-POST /api/projects/{id}/sections/{sid}/regenerate Regenerate with
-feedback
-
-POST /api/projects/{id}/sections/merge Merge two sections
-
-PUT /api/projects/{id}/sections/{sid}/resize Resize section
-
-POST /api/projects/{id}/sections/{sid}/split Split section
-
-POST /api/projects/{id}/sections/{sid}/undo Restore discarded track
-
-GET /api/projects/{id}/clips/{cid}/stream Stream a clip for preview
-
-POST /api/projects/{id}/export Trigger export
-
-GET /api/projects/{id}/export/download Download MP4
-
-GET /api/projects/{id}/tracks/{tid}/download Download individual track
-
-**Clip upload rules:**
-
--   Max file size: 1 GB
-
--   Videos longer than 4 minutes accepted; only first 240s used for
-    > analysis and preview
-
--   Returns Clip with id, duration, thumbnail_urls, start_time, end_time
-
-### **6.2 Pydantic Models**
-
-****class CreativeBrief(BaseModel):
-
-overall_energy: str
-
-music_style_direction: str
-
-references_text: Optional\[str\] = \"\"
+Modal overlay, 4 steps via Supabase Realtime:
+1. "Uploading clips..."
+2. "Extracting frames..." (parallel with 3)
+3. "Transcribing audio..." (parallel with 2)
+4. "Analysing video structure..."
+
+If step 4 fails or times out → fallback (§8.3).
+
+**Fallback notice:** show banner in workspace: `"Automatic segmentation used — AI analysis unavailable."`
+
+---
+
+## 7. Backend API
+
+### 7.1 Endpoints
+
+```
+POST   /api/projects                                Create project
+POST   /api/projects/{id}/clips                     Upload clips (multipart)
+POST   /api/projects/{id}/brief                     Submit brief + trigger analysis
+PUT    /api/projects/{id}/brief                     Update brief (no auto-regen)
+GET    /api/projects/{id}/sections                  Get sections
+PUT    /api/projects/{id}/sections/{sid}            Update section_type / emotional_tone
+POST   /api/projects/{id}/sections/{sid}/generate   Trigger music generation
+POST   /api/projects/{id}/sections/{sid}/regenerate Regenerate with feedback
+POST   /api/projects/{id}/sections/merge            Merge two sections
+POST   /api/projects/{id}/sections/{sid}/split      Split at clip boundary
+GET    /api/projects/{id}/clips/{cid}/stream        Stream clip for preview
+POST   /api/projects/{id}/preview                   Build preview MP4, return URL
+POST   /api/projects/{id}/export                    Full export
+GET    /api/projects/{id}/export/download           Download MP4
+GET    /api/projects/{id}/tracks/{tid}/download     Download individual track
+```
+
+**Clip upload rules:** max 1 GB. Videos >4 min accepted; only first 240s used for analysis. Returns `id`, `duration`, `thumbnail_urls`, `start_time`, `end_time`.
+
+### 7.2 Pydantic Models
+
+```python
+class CreativeBrief(BaseModel):
+    overall_energy: str
+    music_style_direction: str
+    references_text: Optional[str] = ""
 
 class SectionUpdate(BaseModel):
-
-section_type: Optional\[str\]
-
-emotional_tone: Optional\[str\]
+    section_type: Optional[str] = None
+    emotional_tone: Optional[str] = None
 
 class MergeRequest(BaseModel):
-
-section_ids: List\[str\] \# exactly 2, must be adjacent
-
-class ResizeRequest(BaseModel):
-
-new_start_time: Optional\[float\]
-
-new_end_time: Optional\[float\]
+    section_ids: List[str]  # exactly 2, adjacent
 
 class SplitRequest(BaseModel):
-
-split_at_clip_id: str
+    split_at_clip_id: str
 
 class RegenerateRequest(BaseModel):
+    feedback: str
+```
 
-feedback: str
+### 7.3 Realtime (Supabase)
 
-### **6.3 Realtime Events (Supabase Realtime)**
+Backend writes status to Supabase rows. Frontend subscribes via Supabase Realtime — no custom WebSocket.
 
-The backend updates Supabase rows. The frontend subscribes to table
-changes via Supabase Realtime. No custom WebSocket server needed.
+| Table | Change | Frontend action |
+|---|---|---|
+| `sections` | `music_status` UPDATE | Update music block |
+| `tracks` | INSERT | Show track, update section |
+| `projects` | UPDATE | Sync state |
+| `pipeline_events` | INSERT | Drive progress overlay |
 
-  -----------------------------------------------------------------------
-  **Table**   **Event**                 **Frontend action**
-  ----------- ------------------------- ---------------------------------
-  sections    UPDATE music_status       Update music layer block
+---
 
-  tracks      INSERT                    Show new track, update section
+## 8. AI Pipeline
 
-  projects    UPDATE                    Sync project state
-  -----------------------------------------------------------------------
+### 8.1 Frame Extraction (FFmpeg, 2 passes, parallel)
 
-For pipeline progress (steps 1--4), backend writes to a pipeline_events
-table; frontend subscribes.
+**Pass 1 — Analysis frames:**
+```bash
+ffmpeg -i clip.mp4 -vf "fps=1,scale=256:144" -q:v 8 frames/clip_N_%04d.jpg
+```
+Cap at `MAX_ANALYSIS_FRAMES = 120` total, subsampled evenly. Never sent to frontend.
 
-## **7. AI Pipeline**
+**Pass 2 — Thumbnail strip:**
+```bash
+ffmpeg -i clip.mp4 -vf "fps=0.4,scale=128:72" -q:v 10 thumbnails/clip_N_%04d.jpg
+```
+Upload to Supabase Storage. Return URLs as `thumbnail_urls`.
 
-### **7.1 Trigger**
+### 8.2 Cut Density Computation
 
-Fires after user submits the Creative Brief. Four parallel operations:
+From clip metadata only (no FFmpeg). Rolling 5-second windows. Output: `[{window_start, window_end, cuts_per_second}]`.
 
-**7.1.1 Frame Extraction --- Two Passes (FFmpeg)**
+### 8.3 Audio Transcription (ElevenLabs STT)
 
-Pass 1 --- Analysis frames (GPT-4o input):
+Each clip is transcribed **individually**. Do not concatenate clips with FFmpeg.
 
-ffmpeg -i clip.mp4 -vf \"fps=1,scale=256:144\" -q:v 8
-frames/clip_N_frame\_%04d.jpg
+```
+POST https://api.elevenlabs.io/v1/speech-to-text
+```
 
--   1fps, 256×144, JPEG q60
+Request word-level timestamps. Merge transcripts in memory using clip offsets to produce a full timeline transcript. ElevenLabs STT is the sole provider — no Whisper.
 
--   Min 1 frame per clip
+### 8.4 GPT-4o Vision Call
 
--   Frame count: min(MAX_ANALYSIS_FRAMES, max(1, floor(min(duration,
-    > 240))))
+Runs after 8.1, 8.2, 8.3 complete. Timeout: 35s. On failure → §8.5 fallback.
 
--   Tag each frame with absolute timeline timestamp
-
--   Never sent to frontend
-
-Pass 2 --- Thumbnail strip (timeline UI):
-
-ffmpeg -i clip.mp4 -vf \"fps=0.4,scale=128:72\" -q:v 10
-thumbnails/clip_N_thumb\_%04d.jpg
-
--   1 frame per \~2.5s, 128×72
-
--   Upload to Supabase Storage, return public URLs as thumbnail_urls
-
-Both passes run in parallel across all clips.
-
-**7.1.2 Cut Density Computation**
-
--   Computed from clip metadata (no FFmpeg)
-
--   Rolling 5-second windows across timeline
-
--   Output: CutDensityWindow\[\] with {window_start, window_end,
-    > cuts_per_second}
-
-**7.1.3 Audio Transcription (ElevenLabs STT)**
-
-****POST https://api.elevenlabs.io/v1/speech-to-text
-
--   Extract assembled audio via FFmpeg: ffmpeg -i \"concat:\...\" -vn
-    > -acodec pcm_s16le assembled.wav
-
--   Request word-level timestamps
-
--   ElevenLabs STT is the **sole** transcription provider. No Whisper.
-
-### **7.2 GPT-4o Vision Call**
-
-Runs after 7.1.1 (Pass 1), 7.1.2, 7.1.3 all complete. Single API call.
-
-POST https://api.openai.com/v1/chat/completions
-
+```
+POST https://api.openai.com/v1/chat/completions
 model: gpt-4o
+```
 
-**Prompt:**
-
-****You are scoring a video for background music composition.
+**Prompt:**
+```
+You are scoring a video for background music composition.
 
 CREATIVE BRIEF:
-
 Overall Energy: {overall_energy}
-
-Music Style Direction: {music_style_direction}
-
+Music Style: {music_style_direction}
 References: {references_text}
 
-Divide the video into 3 to 5 narrative sections suitable for independent
-music scoring.
+Divide into 3–5 narrative sections aligned to clip boundaries.
 
-Section boundaries must align exactly with clip boundaries.
+Cut density: >2.0=Very Fast, 1.0–2.0=Fast, 0.3–1.0=Medium, 0.1–0.3=Slow, <0.1=Very Slow
 
-Cut density thresholds:
+Return ONLY a raw JSON array. No markdown, no explanation.
 
-\> 2.0 cuts/sec = Very Fast. 1.0--2.0 = Fast. 0.3--1.0 = Medium.
+[{
+  "start_time": float,
+  "end_time": float,
+  "section_type": <SECTION_TYPES>,
+  "scene_type": <SCENE_TYPES>,
+  "emotional_tone": <EMOTIONAL_TONES>,
+  "pacing": <PACING>,
+  "energy_level": <ENERGY_LEVELS>,
+  "cuts_per_second": float,
+  "detected_theme": "max 12 words",
+  "dominant_visual": "max 8 words",
+  "suggested_music_style": "max 30 words, must use creator's style direction"
+}]
+```
 
-0.1--0.3 = Slow. \< 0.1 = Very Slow.
+### 8.5 Fallback (GPT-4o fails or >35s)
 
-Return ONLY a JSON array. No explanation, no markdown. Raw JSON only.
+Divide timeline into **4 equal sections** aligned to clip boundaries.
 
-Schema:
+| Section | Type |
+|---|---|
+| 1 | Hook |
+| 2 | Build |
+| 3 | Climax |
+| 4 | Outro |
 
-\[{
+All sections: `scene_type = "Vlog/Casual"`, `emotional_tone = "Energetic"`, `pacing = "Medium"`, `energy_level = "Medium"`.
 
-\"start_time\": float,
+Set `projects.analysis_mode = "FALLBACK"`. Frontend shows banner: **"Automatic segmentation used — AI analysis unavailable."**
 
-\"end_time\": float,
+### 8.6 Music Generation (ElevenLabs)
 
-\"section_type\": \<one of SECTION_TYPES\>,
-
-\"scene_type\": \<one of SCENE_TYPES\>,
-
-\"emotional_tone\": \<one of EMOTIONAL_TONES\>,
-
-\"pacing\": \<one of PACING\>,
-
-\"energy_level\": \<one of ENERGY_LEVELS\>,
-
-\"cuts_per_second\": float,
-
-\"detected_theme\": \"string max 12 words\",
-
-\"dominant_visual\": \"string max 8 words\",
-
-\"suggested_music_style\": \"string max 30 words --- must incorporate
-creator\'s style direction\"
-
-}\]
-
-Timeout: 35 seconds. On failure → fallback (§7.3).
-
-### **7.3 Fallback (Vision fails or \>35s)**
-
-****def fallback_sections(clips, cut_density_windows, brief):
-
-\# Group windows by density into 3--5 segments at clip boundaries
-
-\# Assign section_types sequentially: Hook, Intro, Build, Reveal, Outro
-
-\# scene_type = \"Vlog/Casual\" for all
-
-\# emotional_tone from brief keyword match, default \"Energetic\"
-
-\# pacing from cut density thresholds
-
-\# energy_level mapped from pacing
-
-\# suggested_music_style = brief.music_style_direction + per-type
-default
-
-### **7.4 Music Generation (ElevenLabs)**
-
-****POST https://api.elevenlabs.io/v1/sound-generation
-
-**Prompt construction:**
-
-****def build_music_prompt(section, brief):
-
-parts = \[
-
-brief.music_style_direction,
-
-brief.overall_energy,
-
-f\"Section: {section.section_type}\",
-
-f\"Scene: {section.scene_type}\",
-
-f\"Mood: {section.emotional_tone}\",
-
-f\"Energy: {section.energy_level}\",
-
-f\"Pacing: {section.pacing}\",
-
-f\"Style: {section.suggested_music_style}\",
-
-\]
-
-if brief.references_text:
-
-parts.append(f\"References: {brief.references_text}\")
-
-if section.feedback_history:
-
-parts.append(\"User direction: \" + \".
-\".join(section.feedback_history))
-
-return \". \".join(parts)
-
-**Request body:**
-
-****{
-
-\"text\": \"\<prompt\>\",
-
-\"duration_seconds\": \<section.duration\>,
-
-\"prompt_influence\": 0.7
-
+```
+POST https://api.elevenlabs.io/v1/sound-generation
+{
+  "text": "<prompt>",
+  "duration_seconds": <section.duration>,
+  "prompt_influence": 0.7
 }
+```
 
-**Long section handling:** If section.duration \> 30, split into chunks
-of ≤30s, generate each chunk with the same prompt (parallel per-section,
-sequential per-chunk), concatenate with FFmpeg, treat as one Track.
+**Prompt:**
+```python
+def build_music_prompt(section, brief):
+    parts = [
+        brief.music_style_direction,
+        brief.overall_energy,
+        f"Section: {section.section_type}. Scene: {section.scene_type}.",
+        f"Mood: {section.emotional_tone}. Energy: {section.energy_level}. Pacing: {section.pacing}.",
+        f"Style: {section.suggested_music_style}.",
+    ]
+    if brief.references_text:
+        parts.append(f"References: {brief.references_text}")
+    if section.feedback_history:
+        parts.append("User direction: " + ". ".join(section.feedback_history))
+    return " ".join(parts)
+```
 
-**Duration mismatch:**
+**Long sections:** if `section.duration > 30`, split into ≤30s chunks, generate sequentially with the same prompt, concatenate with FFmpeg.
 
-1.  If returned audio \< section.duration: retry once with
-    > duration_seconds + 2.0
+**After generation, always trim with FFmpeg to exactly `section.duration`:**
+```bash
+ffmpeg -i track.mp3 -t {section.duration} -c copy trimmed.mp3
+```
+If generated audio is shorter than `section.duration`, use as-is — silence fills the remainder during preview/export. Set `trimmed_to_fit = true`. **Never retry for duration mismatch. Never stretch audio.**
 
-2.  If retry ≥ target: trim with FFmpeg, set trimmed_to_fit = true
+### 8.7 Queuing & Retry
 
-3.  If retry still short: use as-is, silence fills remainder. Set
-    > trimmed_to_fit = true
-
-4.  **Never stretch or time-scale audio.**
-
-### **7.5 Queuing & Retry**
-
-****import asyncio
-
-semaphore = asyncio.Semaphore(MUSIC_QUEUE_CONCURRENCY) \# default 2
+```python
+semaphore = asyncio.Semaphore(MUSIC_QUEUE_CONCURRENCY)
 
 async def generate_with_retry(section):
+    async with semaphore:
+        for attempt in range(1, MUSIC_RETRY_MAX + 1):
+            try:
+                return await call_elevenlabs(section)
+            except Exception:
+                if attempt == MUSIC_RETRY_MAX:
+                    raise
+                delay = (MUSIC_RETRY_BASE_DELAY_MS * (2 ** (attempt - 1)) / 1000)
+                delay *= (0.5 + random.random() * 0.5)
+                await asyncio.sleep(delay)
+```
 
-async with semaphore:
+Status written to `sections.music_status`. Frontend updates via Realtime. Tracks appear one-by-one.
 
-for attempt in range(1, MUSIC_RETRY_MAX + 1):
+---
 
-try:
+## 9. Section Editing
 
-return await call_elevenlabs(section)
+All edits sent to backend. Frontend never mutates boundaries directly.
 
-except Exception as e:
+### 9.0 UX Guard
 
-if attempt == MUSIC_RETRY_MAX:
+If any affected section has `music_status === 'READY'`, backend returns `requires_confirmation: true`. Frontend shows inline warning **on the music block**: "This will clear the generated track. Continue?" with Continue / Cancel. No modal.
 
-raise
+### 9.1 Merge (`POST /api/projects/{id}/sections/merge`)
 
-delay = MUSIC_RETRY_BASE_DELAY_MS \* (2 \*\* (attempt - 1)) / 1000
+Body: `{ section_ids: [id1, id2] }` — must be adjacent.
 
-delay \*= (0.5 + random.random() \* 0.5) \# jitter
+- Larger section (by duration) wins `section_type` and `emotional_tone`
+- `start_time` = earlier's start, `end_time` = later's end
+- `clip_ids` concatenated in order, `cuts_per_second` recomputed
+- Both tracks discarded, reset to `PENDING`, `feedback_history` cleared
 
-await asyncio.sleep(delay)
+### 9.2 Split (`POST /api/projects/{id}/sections/{sid}/split`)
 
--   Per-section status updates written to Supabase
-    > sections.music_status
+Body: `{ split_at_clip_id }` — clip boundary only.
 
--   Frontend sees updates via Realtime subscription
+- Earlier half: keeps original `section_type` and `emotional_tone`
+- Later half: next `section_type` in sequence (if Outro → stays Outro)
+- Both halves inherit `scene_type`, `energy_level`, `pacing`
+- Both reset to `PENDING`, `feedback_history` cleared
 
--   Tracks appear one-by-one as they complete
+---
 
-## **8. Section Editing Rules**
+## 10. Export (`POST /api/projects/{id}/export`)
 
-All edits go to the backend. Frontend never mutates section boundaries
-directly.
+Before mixing, each READY track is trimmed or padded with silence so its duration **exactly equals** the section duration.
 
-### **8.0 UX Guard --- Confirmation on Destructive Edits**
+Then:
+1. Concatenate all section tracks in timeline order → single music track
+2. Concatenate all clips in order → video
+3. Mix music track with video via FFmpeg → MP4 (H.264, AAC)
+4. Upload to Supabase Storage, return download URL
 
-When any resize/merge/split would affect a section with music_status ===
-\'READY\':
+**On failure:** show modal with two options — **Retry Export** (re-triggers) or **Export Manually** (per-track download links + editor instructions).
 
--   Backend returns a requires_confirmation: true flag
+---
 
--   Frontend shows inline warning **on the music block**: \"This will
-    > clear the generated track. Continue?\"
+## 11. Phase 1 — Workspace Shell (Build First)
 
--   Two buttons: **Continue** / **Cancel**
+Build the full UI with mocked AI. Everything must look and feel real.
 
--   No modal --- warning appears directly on the music layer block
+| Feature | Phase 1 behaviour |
+|---|---|
+| Clip upload | Fully works — Supabase Storage, thumbnails, ffprobe |
+| Creative Brief | Form appears, answers stored — no AI pipeline |
+| Section detection | Mocked: 3–5 equal sections at clip boundaries |
+| Default values | section_type sequential (Hook/Intro/Build/Reveal/Outro), scene_type=Vlog/Casual, emotional_tone=Energetic, pacing=Medium, energy_level=Medium |
+| AI fields | detected_theme="Scene analysis pending", suggested_music_style="Style pending", dominant_visual="Pending" |
+| Music layer | All PENDING |
+| Generate button | Toast: "AI generation available in Phase 2" |
+| Preview | `<video>` plays clips directly, no audio |
+| Export | Disabled |
+| Merge / Split | Fully works with UX guard |
+| Playhead / Zoom | Fully works |
 
--   If no READY tracks affected, proceed immediately (no flag)
+---
 
-### **8.1 Merge (POST /api/projects/{id}/sections/merge)**
+## 12. Cut Features
 
--   Body: { section_ids: \[id1, id2\] } --- must be adjacent
+| Feature | Reason |
+|---|---|
+| Clip reorder | Cut — simplifies editing model |
+| Section resize | Cut — merge/split is sufficient |
+| Undo / discard track restore | Cut — complexity not worth it for MVP |
+| Beat-level sync | Too complex for 24h |
+| User accounts | Post-hackathon |
+| DAW controls | Different product |
+| YouTube/TikTok import | Stub only, disabled |
+| Mobile layout | Desktop only |
+| Audio stretching | Never — silence fills gaps |
+| Reference file audio analysis | Phase 2 |
 
--   Larger section (by duration) wins section_type and emotional_tone
+---
 
--   start_time = earlier\'s start, end_time = later\'s end
+## 13. Known Risks
 
--   clip_ids = concatenated in order
+| # | Risk | Mitigation |
+|---|---|---|
+| 1 | ElevenLabs `duration_seconds` unreliable | Always trim output with FFmpeg regardless |
+| 2 | GPT-4o 120-frame context limit | Evenly subsample to cap |
+| 3 | Preview MP4 rebuild latency on every track change | Debounce 2s; show "Rebuilding preview..." |
+| 4 | Supabase CDN latency for track playback | Pre-fetch stream URL when section hits READY |
+| 5 | Large dropdowns (30 emotional tones) | Group by energy level, add search |
 
--   cuts_per_second recomputed
+---
 
--   Both musicTrack values discarded; reset to PENDING
+## 14. Demo Script (90 seconds)
 
--   Larger section\'s old track saved as is_discarded = true in tracks
-    > table
+1. Drop 60–90s clips onto import screen
+2. Creative Brief modal → type energy and style
+3. "Score My Video →" → progress overlay
+4. Workspace: 3–5 labelled sections on timeline
+5. Click section → panel shows theme, tone, style
+6. Click "Generate ▶" → amber pulse → track appears
+7. Play → preview MP4 with music streams
+8. Type feedback → Regenerate → new track
+9. Export → browser downloads MP4
 
--   feedback_history cleared
+---
 
-### **8.2 Resize (PUT /api/projects/{id}/sections/{sid}/resize)**
+## 15. Success Metric
 
--   Body: { new_start_time?, new_end_time? } --- must align to clip
-    > boundary
-
--   Recompute duration, clip_ids, cuts_per_second
-
--   Adjacent section updated accordingly
-
--   Resized section and adjacent section both reset to PENDING
-
--   Old tracks saved as is_discarded = true
-
--   section_type, emotional_tone, AI fields preserved
-
--   feedback_history preserved
-
-### **8.3 Split (POST /api/projects/{id}/sections/{sid}/split)**
-
--   Body: { split_at_clip_id } --- clip boundary only
-
--   Two new sections created
-
--   Earlier half: keeps original section_type and emotional_tone
-
--   Later half: next section_type in sequence (Hook→Intro→...→Outro; if
-    > Outro, stays Outro)
-
--   Both halves inherit scene_type, energy_level, pacing from original
-
--   Both reset to PENDING; original track saved as is_discarded = true
-    > on earlier half
-
--   feedback_history cleared on both
-
-### **8.4 Undo (POST /api/projects/{id}/sections/{sid}/undo)**
-
--   Restores the most recent is_discarded = true track for this section
-
--   Single-level undo only
-
--   Sets section back to READY, moves restored track to active
-
-## **9. Export (POST /api/projects/{id}/export)**
-
-**Server-side FFmpeg:**
-
-1.  Concatenate all clips in order
-
-2.  Mix each READY track at its start_time offset (silence for non-READY
-    > sections)
-
-3.  Output: MP4 (H.264, AAC)
-
-4.  Upload to Supabase Storage, return download URL
-
-**On failure --- frontend shows modal with two options:**
-
--   **Retry Export** --- re-triggers pipeline
-
--   **Export Manually** --- shows per-track download links with labels
-    > (section type + time range), plus instructions for iMovie /
-    > DaVinci / CapCut
-
-## **10. Phase 1 --- Workspace Shell (Build First)**
-
-Everything in §5 with these constraints. **Build the full UI first with
-mocked AI. Everything should look and feel real.**
-
-  ------------------------------------------------------------------------
-  **Feature**   **Phase 1 behaviour**
-  ------------- ----------------------------------------------------------
-  Clip upload   Fully works --- drag-drop, Supabase Storage, thumbnails
-
-  Creative      Form appears, answers stored --- no AI pipeline
-  Brief         
-
-  Section       Mocked: auto-divide into 3--5 equal sections at clip
-  detection     boundaries
-
-  Default       section_type sequential (Hook/Intro/Build/Reveal/Outro),
-  values        scene_type = Vlog/Casual, emotional_tone = Energetic,
-                pacing = Medium, energy_level = Medium
-
-  Section panel Placeholder: detected_theme = \"Scene analysis pending\",
-  AI fields     suggested_music_style = \"Style pending --- connect AI\",
-                dominant_visual = \"Pending\"
-
-  Music layer   All sections PENDING
-
-  Generate      Shows toast: \"AI generation available in Phase 2\"
-  button        
-
-  Preview       Client plays clips directly; no audio overlay
-  player        
-
-  Export button Disabled
-
-  Section       Fully works (merge/resize/split with UX guard)
-  editing       
-
-  Playhead      Fully works
-  scrubbing     
-
-  Zoom          Fully works
-  ------------------------------------------------------------------------
-
-## **11. Design Notes for Frontend**
-
--   Background: #0b0c10. Cards: #13151a with border: 1px solid
-    > rgba(255,255,255,0.08).
-
--   Accent: #45f5c5 for CTAs, active states, section tag borders.
-
--   Topbar: background: rgba(11,12,16,0.85); backdrop-filter:
-    > blur(16px); --- sticky.
-
--   Section tags above headings: font-size: 11px; letter-spacing:
-    > 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.4).
-
--   Hover states: background: rgba(255,255,255,0.05) on interactive
-    > rows.
-
--   Generating pulse: \@keyframes pulse { 0%,100%{opacity:1}
-    > 50%{opacity:0.5} } on amber block.
-
--   Font pairing: Display (DM Serif Display) for headings, Mono (IBM
-    > Plex Mono) for labels/metadata.
-
--   Dropdowns for section/tone: grouped by category with search filter
-    > to handle large option counts.
-
-## **12. Explicitly Cut**
-
-  -----------------------------------------------------------------------
-  **Feature**                       **Reason**
-  --------------------------------- -------------------------------------
-  Beat-level sync                   Too complex for 24h
-
-  User accounts / saved projects    Post-hackathon
-
-  DAW controls (stems, EQ, mix)     Different product
-
-  YouTube/TikTok URL import         Stub UI only, disabled
-
-  Mobile layout                     Desktop only
-
-  Pre-loaded demo clips             Judges import live
-
-  Canva/Premiere integration        Not in scope
-
-  Audio stretching/time-scaling     Never --- silence fills gaps instead
-
-  Reference file audio analysis     Phase 2 --- filenames in prompt text
-                                    only
-
-  Server-side preview MP4 assembly  Replaced by client-side Web Audio API
-  -----------------------------------------------------------------------
-
-## **13. Known Risks**
-
-  ------------------------------------------------------------------------------
-  **\#**   **Risk**                        **Mitigation**
-  -------- ------------------------------- -------------------------------------
-  1        ElevenLabs duration_seconds     Verify before build. If not: generate
-           param may not be supported      without constraint, trim with FFmpeg.
-
-  2        GPT-4o Vision context limit     Capped at 120 frames, evenly
-           with 120 frames                 subsampled.
-
-  3        Client-side audio sync drift on Resync AudioContext to
-           long videos                     video.currentTime on every timeupdate
-                                           event.
-
-  4        Supabase Storage CDN latency    Pre-fetch track URLs when section
-           for track playback              enters READY state.
-
-  5        Large dropdown lists (30        Group by energy level; add search
-           emotional tones)                filter.
-  ------------------------------------------------------------------------------
-
-## **14. Demo Script (90 seconds)**
-
-1.  Judge drops 60--90s clips onto import screen
-
-2.  Creative Brief modal → types energy and style direction
-
-3.  \"Score My Video →\" → progress overlay: frames → transcription →
-    > analysis
-
-4.  Workspace: 3--5 sections auto-labelled on timeline
-
-5.  Click section → panel shows theme, scene type, emotional tone
-
-6.  Click \"Generate ▶\" on section → amber pulse → track appears
-
-7.  Hit play → video plays, music layers underneath via Web Audio
-
-8.  Type \"make it more energetic\" → Regenerate → new track
-
-9.  Export → browser downloads merged MP4
-
-## **15. Success Metric**
-
-A judge uploads a clip. They hear music that fits each part of the
-video. They say \"oh that\'s good\" out loud.
+A judge uploads a clip. They hear music that fits each part of the video. They say "oh that's good" out loud.
