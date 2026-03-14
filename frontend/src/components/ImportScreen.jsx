@@ -9,6 +9,9 @@ const ACCEPTED_TYPES = {
   'video/webm': ['.webm'],
 };
 
+const MAX_FILE_SIZE_MB = 50;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
 const formatSize = (bytes) => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -24,7 +27,25 @@ export default function ImportScreen({ onComplete }) {
       toast.error('Only MP4, MOV, and WebM files are accepted.');
     }
     if (acceptedFiles.length > 0) {
-      setFiles((prev) => [...prev, ...acceptedFiles]);
+      // Filter out files that exceed size limit
+      const validFiles = [];
+      const oversizedFiles = [];
+
+      acceptedFiles.forEach((file) => {
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          oversizedFiles.push(file.name);
+        } else {
+          validFiles.push(file);
+        }
+      });
+
+      if (oversizedFiles.length > 0) {
+        toast.error(`Files exceed ${MAX_FILE_SIZE_MB}MB limit: ${oversizedFiles.join(', ')}`);
+      }
+
+      if (validFiles.length > 0) {
+        setFiles((prev) => [...prev, ...validFiles]);
+      }
     }
   }, []);
 
@@ -147,7 +168,7 @@ export default function ImportScreen({ onComplete }) {
             <p style={styles.dropText}>
               {isDragActive ? 'Drop your clips here' : 'Drop your video clips here'}
             </p>
-            <p style={styles.dropHint}>MP4, MOV, WebM accepted</p>
+            <p style={styles.dropHint}>MP4, MOV, WebM accepted • Max {MAX_FILE_SIZE_MB}MB per file</p>
           </div>
         </div>
 

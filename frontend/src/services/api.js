@@ -50,8 +50,11 @@ export const mergeSections = (projectId, sectionIds) =>
 export const resizeSection = (projectId, sectionId, data) =>
   api.put(`/projects/${projectId}/sections/${sectionId}/resize`, data);
 
-export const splitSection = (projectId, sectionId, splitAtClipId) =>
-  api.post(`/projects/${projectId}/sections/${sectionId}/split`, { split_at_clip_id: splitAtClipId });
+export const splitSection = (projectId, sectionId, { splitAtClipId, splitAtTime }) =>
+  api.post(`/projects/${projectId}/sections/${sectionId}/split`, {
+    split_at_clip_id: splitAtClipId,
+    split_at_time: splitAtTime,
+  });
 
 export const undoSection = (projectId, sectionId) =>
   api.post(`/projects/${projectId}/sections/${sectionId}/undo`);

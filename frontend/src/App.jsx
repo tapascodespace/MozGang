@@ -73,16 +73,12 @@ export default function App() {
     }
   }, [project]);
 
-  const handleBriefUpdate = useCallback(async (brief) => {
-    try {
-      await api.updateBrief(project.id, brief);
-      setProject((prev) => prev ? { ...prev, ...brief } : prev);
-      toast.success('Brief updated');
-      setEditingBrief(false);
-    } catch (e) {
-      toast.error('Failed to update brief');
-    }
-  }, [project]);
+  const handleBriefUpdate = useCallback((brief) => {
+    // CreativeBrief already called api.updateBrief and showed toast
+    // Just update local state and close the modal
+    setProject((prev) => prev ? { ...prev, ...brief } : prev);
+    setEditingBrief(false);
+  }, []);
 
   const handleSelectSection = useCallback((sectionId) => {
     setSelectedSectionId(sectionId);
@@ -132,20 +128,43 @@ export default function App() {
     }
   }, [project, sections]);
 
-  const handleSplitSection = useCallback(async (sectionId, splitAtClipId) => {
-    if (!splitAtClipId) {
-      toast.error('Pick a clip to split at');
+  // Split at exact cursor position (ms precise)
+  const handleSplitAtCursor = useCallback(async (time) => {
+    // Find which section contains this time
+    const orderedSections = [...sections].sort((a, b) => a.section_order - b.section_order);
+    let targetSection = null;
+
+    for (const sec of orderedSections) {
+      if (time >= sec.start_time && time < sec.end_time) {
+        targetSection = sec;
+        break;
+      }
+    }
+
+    if (!targetSection) {
+      toast.error('No section at cursor position');
       return;
     }
+
+    // Check if split point is too close to section boundaries (within 0.1s)
+    if (time - targetSection.start_time < 0.1) {
+      toast.error('Split point too close to section start');
+      return;
+    }
+    if (targetSection.end_time - time < 0.1) {
+      toast.error('Split point too close to section end');
+      return;
+    }
+
     try {
-      await api.splitSection(project.id, sectionId, splitAtClipId);
+      await api.splitSection(project.id, targetSection.id, { splitAtTime: time });
       const refreshed = await api.getSections(project.id);
       setSections(refreshed.data);
-      toast.success('Section split');
+      toast.success(`Section split at ${time.toFixed(2)}s`);
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Split failed');
     }
-  }, [project]);
+  }, [project, sections]);
 
   const handleRegenerateMusic = useCallback(async (sectionId, feedback) => {
     try {
@@ -226,20 +245,18 @@ export default function App() {
                   onSelectSection={handleSelectSection}
                   onTimeSeek={handleTimeSeek}
                   onZoomChange={setZoomLevel}
+                  onMergeSections={handleMergeSections}
+                  onSplitAtCursor={handleSplitAtCursor}
                 />
               </div>
             </div>
             <SectionPanel
               section={selectedSection}
               project={project}
-              sections={sections}
-              clips={clips}
               onUpdateSection={handleUpdateSection}
               onGenerateMusic={handleGenerateMusic}
               onRegenerateMusic={handleRegenerateMusic}
               onEditBrief={() => setEditingBrief(true)}
-              onMergeSections={handleMergeSections}
-              onSplitSection={handleSplitSection}
             />
           </div>
         </>

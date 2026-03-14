@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useMemo } from 'react';
+import React, { useRef, useCallback, useMemo, useState } from 'react';
 
 // ── Design Tokens ──────────────────────────────────────────────────────────────
 const TOKEN = {
@@ -58,7 +58,7 @@ const MUSIC_STATUS = {
 // ── Pulse keyframes injected once ──────────────────────────────────────────────
 const PULSE_KEYFRAMES_ID = 'scoreflow-timeline-pulse';
 
-function ensurePulseKeyframes() {
+function ensureTimelineStyles() {
   if (typeof document === 'undefined') return;
   if (document.getElementById(PULSE_KEYFRAMES_ID)) return;
   const style = document.createElement('style');
@@ -68,8 +68,21 @@ function ensurePulseKeyframes() {
       0%, 100% { opacity: 1; }
       50%      { opacity: 0.55; }
     }
+    .section-merge-boundary:hover .merge-btn {
+      opacity: 1 !important;
+      background: rgba(255,255,255,0.25) !important;
+    }
+    .section-merge-boundary .merge-btn:hover {
+      background: rgba(69,245,197,0.4) !important;
+      border-color: #45f5c5 !important;
+    }
   `;
   document.head.appendChild(style);
+}
+
+// Keep old function name for compatibility
+function ensurePulseKeyframes() {
+  ensureTimelineStyles();
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -227,12 +240,68 @@ const S = {
     opacity: 0.6,
     whiteSpace: 'nowrap',
   },
+  sectionBoundary: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 20,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    zIndex: 5,
+    transform: 'translateX(-50%)',
+  },
+  mergeBtn: {
+    width: 18,
+    height: 18,
+    borderRadius: '50%',
+    background: 'rgba(255,255,255,0.15)',
+    border: '1px solid rgba(255,255,255,0.3)',
+    color: '#fff',
+    fontSize: 12,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    opacity: 0,
+    transition: 'opacity 0.15s, background 0.15s',
+  },
+  contextMenu: {
+    position: 'fixed',
+    background: TOKEN.bgCard,
+    border: `1px solid ${TOKEN.stroke}`,
+    borderRadius: 8,
+    padding: '4px 0',
+    minWidth: 160,
+    boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+    zIndex: 1000,
+  },
+  contextMenuItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 12px',
+    color: TOKEN.textBright,
+    fontSize: 12,
+    cursor: 'pointer',
+    border: 'none',
+    background: 'none',
+    width: '100%',
+    textAlign: 'left',
+  },
+  contextMenuDivider: {
+    height: 1,
+    background: TOKEN.stroke,
+    margin: '4px 0',
+  },
 };
 
 // ── Component ──────────────────────────────────────────────────────────────────
 export default function Timeline({
   clips = [],
   sections = [],
+  // eslint-disable-next-line no-unused-vars
   tracks = [],
   zoomLevel = 10,
   currentTime = 0,
@@ -240,10 +309,13 @@ export default function Timeline({
   onSelectSection,
   onTimeSeek,
   onZoomChange,
+  onMergeSections,
+  onSplitAtCursor,
 }) {
   ensurePulseKeyframes();
 
   const scrollRef = useRef(null);
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, time }
 
   // Total timeline width (px) derived from clips
   const totalDuration = useMemo(
@@ -252,19 +324,53 @@ export default function Timeline({
   );
   const timelineWidth = totalDuration * zoomLevel;
 
+  // ── Calculate time from mouse position ───────────────────────────────────
+  const getTimeFromMouseEvent = useCallback(
+    (e) => {
+      if (!scrollRef.current) return 0;
+      const rect = scrollRef.current.getBoundingClientRect();
+      const scrollLeft = scrollRef.current.scrollLeft;
+      const labelWidth = 72;
+      const xInTimeline = e.clientX - rect.left + scrollLeft - labelWidth;
+      return Math.max(0, xInTimeline / zoomLevel);
+    },
+    [zoomLevel],
+  );
+
   // ── Click → seek ──────────────────────────────────────────────────────────
   const handleTimelineClick = useCallback(
     (e) => {
-      if (!onTimeSeek || !scrollRef.current) return;
-      const rect = scrollRef.current.getBoundingClientRect();
-      const scrollLeft = scrollRef.current.scrollLeft;
-      const labelWidth = 72; // matches S.label.width
-      const xInTimeline = e.clientX - rect.left + scrollLeft - labelWidth;
-      const clickTime = Math.max(0, xInTimeline / zoomLevel);
+      // Close context menu on any click
+      setContextMenu(null);
+      if (!onTimeSeek) return;
+      const clickTime = getTimeFromMouseEvent(e);
       onTimeSeek(clickTime);
     },
-    [onTimeSeek, zoomLevel],
+    [onTimeSeek, getTimeFromMouseEvent],
   );
+
+  // ── Right-click → context menu ────────────────────────────────────────────
+  const handleContextMenu = useCallback(
+    (e) => {
+      e.preventDefault();
+      const time = getTimeFromMouseEvent(e);
+      setContextMenu({ x: e.clientX, y: e.clientY, time });
+    },
+    [getTimeFromMouseEvent],
+  );
+
+  // Close context menu when clicking outside
+  const handleCloseContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  // Handle split from context menu
+  const handleSplitHere = useCallback(() => {
+    if (contextMenu && onSplitAtCursor) {
+      onSplitAtCursor(contextMenu.time);
+    }
+    setContextMenu(null);
+  }, [contextMenu, onSplitAtCursor]);
 
   // ── Zoom handlers ─────────────────────────────────────────────────────────
   const handleZoom = useCallback(
@@ -313,19 +419,25 @@ export default function Timeline({
     return blocks;
   };
 
-  const renderSectionsLayer = () =>
-    sections.map((sec, i) => {
+  const renderSectionsLayer = () => {
+    const orderedSections = [...sections].sort((a, b) => a.section_order - b.section_order);
+    const elements = [];
+    let cumulativeLeft = 0;
+
+    orderedSections.forEach((sec, i) => {
       const w = (sec.duration || 0) * zoomLevel;
       const color = SECTION_COLORS[sec.section_type] || '#666';
       const isSelected = sec.id === selectedSectionId;
-      return (
+
+      // Add section block
+      elements.push(
         <div
           key={sec.id ?? i}
           onClick={() => onSelectSection && onSelectSection(sec.id)}
           style={{
             ...S.sectionBlock,
             width: w,
-            background: color + '33', // 20% opacity fill
+            background: color + '33',
             border: isSelected
               ? '2px solid #ffffff'
               : `1px solid ${color}88`,
@@ -335,7 +447,36 @@ export default function Timeline({
           <span style={S.durationLabel}>{formatDuration(sec.duration)}</span>
         </div>
       );
+
+      // Add merge button between sections (after this section, before next)
+      if (i < orderedSections.length - 1 && onMergeSections) {
+        const nextSec = orderedSections[i + 1];
+        const boundaryLeft = cumulativeLeft + w;
+        elements.push(
+          <div
+            key={`merge-${sec.id}-${nextSec.id}`}
+            className="section-merge-boundary"
+            style={{
+              ...S.sectionBoundary,
+              left: boundaryLeft,
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              // Merge the next section into this one (merge next)
+              onMergeSections(sec.id, 'next');
+            }}
+            title="Merge sections"
+          >
+            <div className="merge-btn" style={S.mergeBtn}>⟷</div>
+          </div>
+        );
+      }
+
+      cumulativeLeft += w;
     });
+
+    return elements;
+  };
 
   const renderMusicLayer = () =>
     sections.map((sec, i) => {
@@ -374,6 +515,7 @@ export default function Timeline({
         ref={scrollRef}
         style={S.scrollArea}
         onClick={handleTimelineClick}
+        onContextMenu={handleContextMenu}
       >
         {/* Playhead */}
         <div style={{ ...S.playhead, left: playheadLeft }} />
@@ -405,6 +547,10 @@ export default function Timeline({
 
       {/* Zoom controls */}
       <div style={S.zoomBar}>
+        <span style={{ fontSize: 10, color: TOKEN.text, opacity: 0.6 }}>
+          Right-click to split
+        </span>
+        <div style={{ flex: 1 }} />
         <button
           type="button"
           style={S.zoomBtn}
@@ -425,6 +571,40 @@ export default function Timeline({
           +
         </button>
       </div>
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <>
+          {/* Backdrop to close menu */}
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 999,
+            }}
+            onClick={handleCloseContextMenu}
+          />
+          <div
+            style={{
+              ...S.contextMenu,
+              left: contextMenu.x,
+              top: contextMenu.y,
+            }}
+          >
+            <button
+              style={S.contextMenuItem}
+              onClick={handleSplitHere}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
+            >
+              ✂️ Split here ({contextMenu.time.toFixed(2)}s)
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -90,6 +90,8 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
   const lastPropSeek = useRef(0);
   const pendingSeekRef = useRef(null);
   const pendingPlayRef = useRef(false);
+  // Ref to track currentClipIndex synchronously (avoids stale closure issues)
+  const currentClipIndexRef = useRef(0);
 
   const log = useCallback((msg, data = {}) => {
     if (typeof window === 'undefined') return;
@@ -99,18 +101,13 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
 
   const derivedClips = useMemo(() => {
     if (!clips || clips.length === 0) return [];
+    // Always use sequential positioning based on duration to match Timeline
+    // This ignores any backend start_time/end_time which may be incorrect
     let cursor = 0;
     return clips.map((clip) => {
-      const hasStart = Number.isFinite(clip.start_time);
-      const hasEnd = Number.isFinite(clip.end_time);
-      const hasDuration = Number.isFinite(clip.duration);
-      const start = hasStart ? clip.start_time : cursor;
-      const duration = hasDuration
-        ? clip.duration
-        : hasStart && hasEnd
-          ? clip.end_time - clip.start_time
-          : 0;
-      const end = hasEnd ? clip.end_time : start + duration;
+      const duration = Number.isFinite(clip.duration) ? clip.duration : 0;
+      const start = cursor;
+      const end = cursor + duration;
       cursor = end;
       return {
         ...clip,
@@ -125,6 +122,11 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
     if (derivedClips.length === 0) return 0;
     return derivedClips[derivedClips.length - 1].__end || 0;
   }, [derivedClips]);
+
+  // Keep ref in sync with state (for use in callbacks that may have stale closures)
+  useEffect(() => {
+    currentClipIndexRef.current = currentClipIndex;
+  }, [currentClipIndex]);
 
   // Build clip URLs from storage paths
   useEffect(() => {
@@ -216,6 +218,8 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
     };
 
     if (targetIdx !== currentClipIndex) {
+      // Update ref BEFORE loading new video (so onLoadedMetadata has correct index)
+      currentClipIndexRef.current = targetIdx;
       setCurrentClipIndex(targetIdx);
       if (videoRef.current && clipUrls[targetIdx]) {
         const wasPlaying = isPlaying;
@@ -249,17 +253,37 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
 
   const handleTimeUpdate = useCallback(() => {
     if (!videoRef.current || !derivedClips[currentClipIndex]) return;
-    // Ignore updates while seeking
+    // Ignore updates while seeking or during clip transitions
     if (Date.now() < seekingUntil.current) return;
-    const clipStart = derivedClips[currentClipIndex].__start;
-    const absoluteTime = clipStart + videoRef.current.currentTime;
+
+    const clip = derivedClips[currentClipIndex];
+    const clipStart = clip.__start;
+    const nominalDuration = clip.__duration || 0;
+    const actualDuration = clipActualDurations[currentClipIndex];
+    const videoTime = videoRef.current.currentTime;
+
+    // Scale video time back to nominal timeline time (inverse of seek scaling)
+    const scale =
+      Number.isFinite(actualDuration) && actualDuration > 0 && nominalDuration > 0
+        ? nominalDuration / actualDuration
+        : 1;
+
+    const scaledVideoTime = videoTime * scale;
+    const absoluteTime = Math.min(clipStart + scaledVideoTime, clip.__end);
+
     setLocalTime(absoluteTime);
     onTimeUpdate?.(absoluteTime);
-  }, [derivedClips, currentClipIndex, onTimeUpdate]);
+  }, [derivedClips, currentClipIndex, clipActualDurations, onTimeUpdate]);
 
   const handleEnded = useCallback(() => {
     const nextIdx = currentClipIndex + 1;
-    if (nextIdx < clipUrls.length) {
+    if (nextIdx < clipUrls.length && derivedClips[nextIdx]) {
+      // Block time updates during clip transition
+      seekingUntil.current = Date.now() + 500;
+      // Update ref BEFORE loading new video (so onLoadedMetadata has correct index)
+      currentClipIndexRef.current = nextIdx;
+      // Set local time to the start of the next clip immediately
+      setLocalTime(derivedClips[nextIdx].__start);
       setCurrentClipIndex(nextIdx);
       if (videoRef.current) {
         videoRef.current.src = clipUrls[nextIdx];
@@ -269,7 +293,7 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
       setIsPlaying(false);
       onPlayStateChange?.(false);
     }
-  }, [currentClipIndex, clipUrls, onPlayStateChange]);
+  }, [currentClipIndex, clipUrls, derivedClips, onPlayStateChange]);
 
   const togglePlay = useCallback(() => {
     if (!videoRef.current || clipUrls.length === 0) return;
@@ -321,14 +345,17 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
         onLoadedMetadata={() => {
           if (!videoRef.current) return;
           const duration = videoRef.current.duration;
+          // Use ref to get current index (avoids stale closure issue during clip transitions)
+          const idx = currentClipIndexRef.current;
           setClipActualDurations((prev) => {
             const next = [...prev];
-            next[currentClipIndex] = duration;
+            next[idx] = duration;
             return next;
           });
           log('loadedmetadata', {
             duration,
             currentTime: videoRef.current.currentTime,
+            clipIndex: idx,
           });
         }}
         onPlay={() => {
