@@ -1,0 +1,32 @@
+import os
+
+PRODUCT_NAME = os.getenv("PRODUCT_NAME", "ScoreFlow")
+
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+
+ELEVENLABS_BASE_URL = "https://api.elevenlabs.io"
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+FFMPEG_PATH = "ffmpeg"
+
+UPLOAD_DIR = "./uploads"
+FRAMES_DIR = "./frames"
+THUMBNAILS_DIR = "./thumbnails"
+AUDIO_DIR = "./audio"
+EXPORT_DIR = "./exports"
+
+MAX_CLIP_ANALYSIS_SECONDS = 240
+MAX_TOTAL_DURATION_SECONDS = 600
+MAX_SECTIONS = 5
+MIN_SECTIONS = 3
+MAX_ANALYSIS_FRAMES = 120
+
+MUSIC_QUEUE_CONCURRENCY = 2
+MUSIC_RETRY_MAX = 3
+MUSIC_RETRY_BASE_DELAY_MS = 1000
+MUSIC_DURATION_RETRY_PADDING_SECONDS = 2.0
+
+PORT = int(os.getenv("PORT", 8000))

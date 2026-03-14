@@ -1,4 +1,6 @@
-# ScoreFlow - AI Video Music Scoring Tool
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 ScoreFlow is an AI-powered tool that analyzes video clips and generates section-appropriate background music. Users drop video clips, describe the energy/style they want, and the AI reads the story to compose music per narrative section.
@@ -54,7 +56,12 @@ cd backend && pip install -r requirements.txt && uvicorn main:app --reload --por
 
 # Frontend
 cd frontend && npm install && npm run dev
+npm run lint     # ESLint
+npm run build    # Production build
 ```
+
+## Database Setup
+Run `python backend/setup_db.py` to check Supabase tables. If missing, paste `supabase_schema.sql` into Supabase SQL Editor and create a public "media" storage bucket.
 
 ## Build Phases
 - **Phase 1**: Full UI with mocked AI (auto-segmentation, placeholder values)

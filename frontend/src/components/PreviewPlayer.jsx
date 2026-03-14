@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 
 const styles = {
   container: {
@@ -59,7 +59,6 @@ const styles = {
     height: '100%',
     background: '#45f5c5',
     borderRadius: 2,
-    transition: 'width 0.1s linear',
   },
   placeholder: {
     color: 'rgba(255,255,255,0.3)',
@@ -81,6 +80,9 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
   const [duration, setDuration] = useState(0);
   const [clipUrls, setClipUrls] = useState([]);
   const [currentClipIndex, setCurrentClipIndex] = useState(0);
+  const [localTime, setLocalTime] = useState(0);
+  const userSeeking = useRef(false);
+  const pendingSeek = useRef(null);
 
   // Build clip URLs from storage paths
   useEffect(() => {
@@ -95,28 +97,6 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
     setDuration(clips.reduce((sum, c) => sum + (c.duration || 0), 0));
   }, [clips]);
 
-  // Find which clip to play based on currentTime
-  useEffect(() => {
-    if (!clips || clips.length === 0) return;
-    let idx = 0;
-    for (let i = 0; i < clips.length; i++) {
-      if (currentTime >= clips[i].start_time && currentTime < clips[i].end_time) {
-        idx = i;
-        break;
-      }
-      if (i === clips.length - 1) idx = i;
-    }
-    if (idx !== currentClipIndex && clipUrls[idx]) {
-      setCurrentClipIndex(idx);
-      if (videoRef.current) {
-        videoRef.current.src = clipUrls[idx];
-        const offset = currentTime - clips[idx].start_time;
-        videoRef.current.currentTime = Math.max(0, offset);
-        if (isPlaying) videoRef.current.play().catch(() => {});
-      }
-    }
-  }, [currentTime, clips, clipUrls]);
-
   // Load first clip
   useEffect(() => {
     if (clipUrls.length > 0 && videoRef.current && !videoRef.current.src) {
@@ -124,15 +104,27 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
     }
   }, [clipUrls]);
 
-  const handleTimeUpdate = () => {
-    if (!videoRef.current || !clips[currentClipIndex]) return;
+  // Handle pending seek after video loads
+  const handleLoadedMetadata = useCallback(() => {
+    if (pendingSeek.current !== null && videoRef.current) {
+      videoRef.current.currentTime = pendingSeek.current;
+      pendingSeek.current = null;
+    }
+  }, []);
+
+  const handleSeeked = useCallback(() => {
+    userSeeking.current = false;
+  }, []);
+
+  const handleTimeUpdate = useCallback(() => {
+    if (!videoRef.current || !clips[currentClipIndex] || userSeeking.current) return;
     const clipStart = clips[currentClipIndex].start_time;
     const absoluteTime = clipStart + videoRef.current.currentTime;
+    setLocalTime(absoluteTime);
     onTimeUpdate?.(absoluteTime);
-  };
+  }, [clips, currentClipIndex, onTimeUpdate]);
 
-  const handleEnded = () => {
-    // Move to next clip
+  const handleEnded = useCallback(() => {
     const nextIdx = currentClipIndex + 1;
     if (nextIdx < clipUrls.length) {
       setCurrentClipIndex(nextIdx);
@@ -144,43 +136,71 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
       setIsPlaying(false);
       onPlayStateChange?.(false);
     }
-  };
+  }, [currentClipIndex, clipUrls, onPlayStateChange]);
 
-  const togglePlay = () => {
+  const togglePlay = useCallback(() => {
     if (!videoRef.current || clipUrls.length === 0) return;
     if (isPlaying) {
       videoRef.current.pause();
+      setIsPlaying(false);
+      onPlayStateChange?.(false);
     } else {
       videoRef.current.play().catch(() => {});
+      setIsPlaying(true);
+      onPlayStateChange?.(true);
     }
-    setIsPlaying(!isPlaying);
-    onPlayStateChange?.(!isPlaying);
-  };
+  }, [isPlaying, clipUrls, onPlayStateChange]);
 
-  const handleScrub = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pct = (e.clientX - rect.left) / rect.width;
-    const seekTime = pct * duration;
+  const seekToTime = useCallback((seekTime) => {
+    if (!clips || clips.length === 0) return;
+
+    userSeeking.current = true;
+    setLocalTime(seekTime);
     onTimeUpdate?.(seekTime);
 
-    // Find correct clip and set video time
+    // Find the correct clip for this time
+    let targetClipIndex = 0;
     for (let i = 0; i < clips.length; i++) {
       if (seekTime >= clips[i].start_time && seekTime < clips[i].end_time) {
-        if (i !== currentClipIndex && clipUrls[i]) {
-          setCurrentClipIndex(i);
-          if (videoRef.current) {
-            videoRef.current.src = clipUrls[i];
-          }
-        }
-        if (videoRef.current) {
-          videoRef.current.currentTime = seekTime - clips[i].start_time;
-        }
+        targetClipIndex = i;
         break;
       }
+      if (i === clips.length - 1) targetClipIndex = i;
     }
-  };
 
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+    const offsetInClip = seekTime - clips[targetClipIndex].start_time;
+
+    if (targetClipIndex !== currentClipIndex) {
+      // Need to load a different clip
+      setCurrentClipIndex(targetClipIndex);
+      pendingSeek.current = offsetInClip;
+      if (videoRef.current && clipUrls[targetClipIndex]) {
+        const wasPlaying = isPlaying;
+        videoRef.current.src = clipUrls[targetClipIndex];
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current.currentTime = offsetInClip;
+          if (wasPlaying) {
+            videoRef.current.play().catch(() => {});
+          }
+          userSeeking.current = false;
+        };
+      }
+    } else {
+      // Same clip, just seek
+      if (videoRef.current) {
+        videoRef.current.currentTime = offsetInClip;
+      }
+    }
+  }, [clips, clipUrls, currentClipIndex, isPlaying, onTimeUpdate]);
+
+  const handleScrub = useCallback((e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const seekTime = pct * duration;
+    seekToTime(seekTime);
+  }, [duration, seekToTime]);
+
+  const progress = duration > 0 ? (localTime / duration) * 100 : 0;
 
   if (!clips || clips.length === 0) {
     return (
@@ -197,6 +217,8 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
         style={styles.video}
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
+        onLoadedMetadata={handleLoadedMetadata}
+        onSeeked={handleSeeked}
         playsInline
       />
       <div style={styles.controls}>
@@ -204,7 +226,7 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
           {isPlaying ? '⏸' : '▶'}
         </button>
         <div style={styles.timeDisplay}>
-          {formatTime(currentTime)} / {formatTime(duration)}
+          {formatTime(localTime)} / {formatTime(duration)}
         </div>
         <div style={styles.scrubber} onClick={handleScrub}>
           <div style={{ ...styles.scrubberFill, width: `${progress}%` }} />
