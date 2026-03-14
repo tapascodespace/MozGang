@@ -1,8 +1,9 @@
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from database import supabase
 from models import SectionUpdate, MergeRequest, ResizeRequest, SplitRequest, RegenerateRequest
 from config import SECTION_TYPES
+from services.music_service import generate_music_for_section
 
 logger = logging.getLogger("scoreflow.sections")
 
@@ -36,32 +37,152 @@ async def update_section(project_id: str, section_id: str, body: SectionUpdate):
 
 
 @router.post("/projects/{project_id}/sections/{section_id}/generate")
-async def generate_music(project_id: str, section_id: str):
-    """Trigger music generation for a section. Phase 1: returns mock response."""
-    # Phase 1: just return a toast message
-    section = supabase.table("sections").select("*").eq("id", section_id).execute()
-    if not section.data:
+async def generate_music(
+    project_id: str,
+    section_id: str,
+    background_tasks: BackgroundTasks
+):
+    """Trigger music generation for a section."""
+    # Verify section exists
+    section_result = supabase.table("sections").select("*").eq("id", section_id).execute()
+    if not section_result.data:
         raise HTTPException(status_code=404, detail="Section not found")
 
-    return {"status": "pending", "message": "AI generation available in Phase 2"}
+    section = section_result.data[0]
+
+    # Verify project and get brief
+    project_result = supabase.table("projects").select("*").eq("id", project_id).execute()
+    if not project_result.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = project_result.data[0]
+
+    # Build brief from project data
+    brief = {
+        "overall_energy": project.get("overall_energy", "Medium energy"),
+        "music_style_direction": project.get("music_style_direction", "Modern background music"),
+        "references_text": project.get("references_text", ""),
+    }
+
+    # Update status to GENERATING
+    supabase.table("sections").update({
+        "music_status": "GENERATING"
+    }).eq("id", section_id).execute()
+
+    logger.info(f"[SECTIONS] Starting music generation for section {section_id[:8]}")
+
+    # Queue background task
+    background_tasks.add_task(
+        _background_generate,
+        section=section,
+        brief=brief,
+        project_id=project_id,
+        section_id=section_id
+    )
+
+    return {"status": "generating", "message": "Music generation started"}
+
+
+async def _background_generate(
+    section: dict,
+    brief: dict,
+    project_id: str,
+    section_id: str
+):
+    """Background task to generate music and update database."""
+    try:
+        logger.info(f"[BACKGROUND] Generating music for section {section_id[:8]}")
+
+        # Generate music
+        track = await generate_music_for_section(section, brief, project_id)
+
+        # Insert track record
+        track_data = {
+            "section_id": section_id,
+            "storage_path": track.storage_path,
+            "stream_url": track.stream_url,
+            "duration": track.duration,
+            "generation_prompt": track.generation_prompt,
+            "trimmed_to_fit": track.trimmed_to_fit,
+            "is_discarded": False,
+        }
+        supabase.table("tracks").insert(track_data).execute()
+
+        # Update section status to READY
+        supabase.table("sections").update({
+            "music_status": "READY"
+        }).eq("id", section_id).execute()
+
+        logger.info(f"[BACKGROUND] Music generation complete for section {section_id[:8]}")
+
+    except Exception as e:
+        logger.error(f"[BACKGROUND] Music generation failed for section {section_id[:8]}: {e}")
+
+        # Update section status to FAILED
+        supabase.table("sections").update({
+            "music_status": "FAILED"
+        }).eq("id", section_id).execute()
 
 
 @router.post("/projects/{project_id}/sections/{section_id}/regenerate")
-async def regenerate_music(project_id: str, section_id: str, body: RegenerateRequest):
-    """Regenerate music with feedback. Phase 1: stores feedback only."""
-    section = supabase.table("sections").select("*").eq("id", section_id).execute()
-    if not section.data:
+async def regenerate_music(
+    project_id: str,
+    section_id: str,
+    body: RegenerateRequest,
+    background_tasks: BackgroundTasks
+):
+    """Regenerate music with user feedback."""
+    # Verify section exists
+    section_result = supabase.table("sections").select("*").eq("id", section_id).execute()
+    if not section_result.data:
         raise HTTPException(status_code=404, detail="Section not found")
 
-    s = section.data[0]
-    feedback_history = s.get("feedback_history") or []
+    section = section_result.data[0]
+
+    # Verify project and get brief
+    project_result = supabase.table("projects").select("*").eq("id", project_id).execute()
+    if not project_result.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = project_result.data[0]
+
+    # Build brief from project data
+    brief = {
+        "overall_energy": project.get("overall_energy", "Medium energy"),
+        "music_style_direction": project.get("music_style_direction", "Modern background music"),
+        "references_text": project.get("references_text", ""),
+    }
+
+    # Append feedback to history
+    feedback_history = section.get("feedback_history") or []
     feedback_history.append(body.feedback)
 
+    # Update section with new feedback and GENERATING status
     supabase.table("sections").update({
-        "feedback_history": feedback_history
+        "feedback_history": feedback_history,
+        "music_status": "GENERATING"
     }).eq("id", section_id).execute()
 
-    return {"status": "pending", "message": "AI regeneration available in Phase 2"}
+    # Mark existing tracks as discarded
+    supabase.table("tracks").update({
+        "is_discarded": True
+    }).eq("section_id", section_id).eq("is_discarded", False).execute()
+
+    logger.info(f"[SECTIONS] Starting music regeneration for section {section_id[:8]} with feedback: {body.feedback}")
+
+    # Update section dict with new feedback for generation
+    section["feedback_history"] = feedback_history
+
+    # Queue background task
+    background_tasks.add_task(
+        _background_generate,
+        section=section,
+        brief=brief,
+        project_id=project_id,
+        section_id=section_id
+    )
+
+    return {"status": "generating", "message": "Music regeneration started"}
 
 
 @router.post("/projects/{project_id}/sections/merge")

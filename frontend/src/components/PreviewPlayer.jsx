@@ -77,13 +77,15 @@ function formatTime(seconds) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlayStateChange }) {
+export default function PreviewPlayer({ clips, sections = [], tracks = [], currentTime, onTimeUpdate, onPlayStateChange }) {
   const videoRef = useRef(null);
+  const audioRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [clipUrls, setClipUrls] = useState([]);
   const [currentClipIndex, setCurrentClipIndex] = useState(0);
   const [localTime, setLocalTime] = useState(0);
   const [clipActualDurations, setClipActualDurations] = useState([]);
+  const [currentTrackUrl, setCurrentTrackUrl] = useState(null);
   // Use a timestamp-based guard instead of a simple boolean so we can
   // ignore onTimeUpdate events that arrive shortly after a seek.
   const seekingUntil = useRef(0);
@@ -146,6 +148,69 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
       videoRef.current.src = clipUrls[0];
     }
   }, [clipUrls]);
+
+  // Find and sync track audio based on current time
+  useEffect(() => {
+    if (!sections.length || !tracks.length) {
+      setCurrentTrackUrl(null);
+      return;
+    }
+
+    // Find which section contains the current time
+    const currentSection = sections.find(
+      (s) => localTime >= s.start_time && localTime < s.end_time
+    );
+
+    if (!currentSection) {
+      setCurrentTrackUrl(null);
+      return;
+    }
+
+    // Find the non-discarded track for this section
+    const track = tracks.find(
+      (t) => t.section_id === currentSection.id && !t.is_discarded && t.stream_url
+    );
+
+    if (track?.stream_url !== currentTrackUrl) {
+      setCurrentTrackUrl(track?.stream_url || null);
+    }
+  }, [localTime, sections, tracks, currentTrackUrl]);
+
+  // Update audio source and sync playback
+  useEffect(() => {
+    if (!audioRef.current) return;
+
+    if (!currentTrackUrl) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+      return;
+    }
+
+    if (audioRef.current.src !== currentTrackUrl) {
+      audioRef.current.src = currentTrackUrl;
+      audioRef.current.load();
+    }
+
+    // Find section for timing offset
+    const currentSection = sections.find(
+      (s) => localTime >= s.start_time && localTime < s.end_time
+    );
+
+    if (currentSection && audioRef.current.readyState >= 1) {
+      const offsetInSection = localTime - currentSection.start_time;
+      const audioDelta = Math.abs(audioRef.current.currentTime - offsetInSection);
+      // Only seek if significantly out of sync
+      if (audioDelta > 0.3) {
+        audioRef.current.currentTime = offsetInSection;
+      }
+    }
+
+    if (isPlaying && audioRef.current.paused) {
+      audioRef.current.play().catch(() => {});
+    } else if (!isPlaying && !audioRef.current.paused) {
+      audioRef.current.pause();
+    }
+  }, [currentTrackUrl, isPlaying, localTime, sections]);
 
   // React to external currentTime prop changes (from Timeline clicks)
   useEffect(() => {
@@ -289,8 +354,10 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
         videoRef.current.src = clipUrls[nextIdx];
         videoRef.current.play().catch(() => {});
       }
+      // Audio will auto-update via the useEffect that watches localTime
     } else {
       setIsPlaying(false);
+      if (audioRef.current) audioRef.current.pause();
       onPlayStateChange?.(false);
     }
   }, [currentClipIndex, clipUrls, derivedClips, onPlayStateChange]);
@@ -299,6 +366,7 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
     if (!videoRef.current || clipUrls.length === 0) return;
     if (isPlaying) {
       videoRef.current.pause();
+      if (audioRef.current) audioRef.current.pause();
       setIsPlaying(false);
       onPlayStateChange?.(false);
     } else {
@@ -314,10 +382,13 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
         readyState: videoRef.current.readyState,
       });
       videoRef.current.play().catch(() => {});
+      if (audioRef.current && currentTrackUrl) {
+        audioRef.current.play().catch(() => {});
+      }
       setIsPlaying(true);
       onPlayStateChange?.(true);
     }
-  }, [isPlaying, clipUrls, onPlayStateChange]);
+  }, [isPlaying, clipUrls, onPlayStateChange, currentTrackUrl]);
 
   const handleScrub = useCallback((e) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -339,6 +410,7 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
 
   return (
     <div style={styles.container}>
+      <audio ref={audioRef} style={{ display: 'none' }} />
       <video
         ref={videoRef}
         style={styles.video}

@@ -66,8 +66,12 @@ export default function App() {
     setSections(sectionsData);
     setView('workspace');
     try {
-      const res = await api.getProject(project.id);
-      setProject(res.data);
+      const [projectRes, tracksRes] = await Promise.all([
+        api.getProject(project.id),
+        api.getTracks(project.id),
+      ]);
+      setProject(projectRes.data);
+      setTracks(tracksRes.data || []);
     } catch (e) {
       // ignore
     }
@@ -229,6 +233,8 @@ export default function App() {
               <div style={{ padding: '12px 16px', flex: '0 0 auto', maxHeight: '50vh' }}>
                 <PreviewPlayer
                   clips={clips}
+                  sections={sections}
+                  tracks={tracks}
                   currentTime={currentTime}
                   onTimeUpdate={handleTimeSeek}
                   onPlayStateChange={() => {}}
