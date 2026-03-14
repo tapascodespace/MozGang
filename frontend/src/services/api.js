@@ -11,9 +11,10 @@ export const createProject = () => api.post('/projects');
 
 export const getProject = (id) => api.get(`/projects/${id}`);
 
-export const uploadClips = (projectId, files) => {
+export const uploadClips = (projectId, files, durations = []) => {
   const formData = new FormData();
   files.forEach((file) => formData.append('files', file));
+  durations.forEach((duration) => formData.append('durations', String(duration)));
   return api.post(`/projects/${projectId}/clips`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 300000,

@@ -20,6 +20,7 @@ export default function App() {
   const [selectedSectionId, setSelectedSectionId] = useState(null);
   const [zoomLevel, setZoomLevel] = useState(10);
   const [currentTime, setCurrentTime] = useState(0);
+  const [editingBrief, setEditingBrief] = useState(false);
 
   const selectedSection = sections.find((s) => s.id === selectedSectionId) || null;
   const hasReadyTracks = sections.some((s) => s.music_status === 'READY');
@@ -37,7 +38,10 @@ export default function App() {
         if (payload.eventType === 'UPDATE') {
           setSections((prev) => prev.map((s) => s.id === payload.new.id ? payload.new : s));
         } else if (payload.eventType === 'INSERT') {
-          setSections((prev) => [...prev, payload.new].sort((a, b) => a.section_order - b.section_order));
+          setSections((prev) => {
+            if (prev.some((s) => s.id === payload.new.id)) return prev;
+            return [...prev, payload.new].sort((a, b) => a.section_order - b.section_order);
+          });
         } else if (payload.eventType === 'DELETE') {
           setSections((prev) => prev.filter((s) => s.id !== payload.old.id));
         }
@@ -69,6 +73,17 @@ export default function App() {
     }
   }, [project]);
 
+  const handleBriefUpdate = useCallback(async (brief) => {
+    try {
+      await api.updateBrief(project.id, brief);
+      setProject((prev) => prev ? { ...prev, ...brief } : prev);
+      toast.success('Brief updated');
+      setEditingBrief(false);
+    } catch (e) {
+      toast.error('Failed to update brief');
+    }
+  }, [project]);
+
   const handleSelectSection = useCallback((sectionId) => {
     setSelectedSectionId(sectionId);
   }, []);
@@ -94,6 +109,41 @@ export default function App() {
       }
     } catch (e) {
       toast.error('Failed to generate music');
+    }
+  }, [project]);
+
+  const handleMergeSections = useCallback(async (sectionId, direction) => {
+    const ordered = [...sections].sort((a, b) => a.section_order - b.section_order);
+    const idx = ordered.findIndex((s) => s.id === sectionId);
+    const neighbor = direction === 'prev' ? ordered[idx - 1] : ordered[idx + 1];
+    if (!neighbor) {
+      toast.error('No adjacent section to merge');
+      return;
+    }
+    try {
+      const res = await api.mergeSections(project.id, [neighbor.id, sectionId]);
+      const merged = res.data;
+      const refreshed = await api.getSections(project.id);
+      setSections(refreshed.data);
+      setSelectedSectionId(merged.id);
+      toast.success('Sections merged');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Merge failed');
+    }
+  }, [project, sections]);
+
+  const handleSplitSection = useCallback(async (sectionId, splitAtClipId) => {
+    if (!splitAtClipId) {
+      toast.error('Pick a clip to split at');
+      return;
+    }
+    try {
+      await api.splitSection(project.id, sectionId, splitAtClipId);
+      const refreshed = await api.getSections(project.id);
+      setSections(refreshed.data);
+      toast.success('Section split');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Split failed');
     }
   }, [project]);
 
@@ -145,6 +195,16 @@ export default function App() {
       {view === 'workspace' && (
         <>
           <TopBar hasReadyTracks={hasReadyTracks} onExport={handleExport} />
+          {editingBrief && (
+            <CreativeBrief
+              project={project}
+              clips={clips}
+              mode="edit"
+              onCancel={() => setEditingBrief(false)}
+              onUpdate={handleBriefUpdate}
+              onComplete={handleBriefComplete}
+            />
+          )}
           <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
               <div style={{ padding: '12px 16px', flex: '0 0 auto', maxHeight: '50vh' }}>
@@ -172,9 +232,14 @@ export default function App() {
             <SectionPanel
               section={selectedSection}
               project={project}
+              sections={sections}
+              clips={clips}
               onUpdateSection={handleUpdateSection}
               onGenerateMusic={handleGenerateMusic}
               onRegenerateMusic={handleRegenerateMusic}
+              onEditBrief={() => setEditingBrief(true)}
+              onMergeSections={handleMergeSections}
+              onSplitSection={handleSplitSection}
             />
           </div>
         </>

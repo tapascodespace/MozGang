@@ -3,7 +3,7 @@ import uuid
 import subprocess
 import json
 import logging
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import List
 from database import supabase
 from config import UPLOAD_DIR, THUMBNAILS_DIR, FFMPEG_PATH, MAX_TOTAL_DURATION_SECONDS
@@ -115,7 +115,11 @@ def generate_thumbnails(filepath: str, clip_id: str, duration: float) -> list:
 
 
 @router.post("/projects/{project_id}/clips")
-async def upload_clips(project_id: str, files: List[UploadFile] = File(...)):
+async def upload_clips(
+    project_id: str,
+    files: List[UploadFile] = File(...),
+    durations: List[float] = Form(None),
+):
     """Upload video clips to project."""
     logger.info(f"[UPLOAD] ========== Starting clip upload for project {project_id[:8]}... ==========")
     logger.info(f"[UPLOAD] Received {len(files)} file(s): {[f.filename for f in files]}")
@@ -156,9 +160,20 @@ async def upload_clips(project_id: str, files: List[UploadFile] = File(...)):
             f.write(content)
         logger.info(f"[UPLOAD] Saved locally: {local_path} ({file_size_mb:.1f} MB)")
 
-        # Get duration
-        duration = get_video_duration(local_path)
-        logger.info(f"[UPLOAD] Duration: {duration:.2f}s for {file.filename}")
+        # Get duration (prefer client-provided when available)
+        provided_duration = None
+        if durations and i < len(durations):
+            try:
+                provided_duration = float(durations[i])
+            except (TypeError, ValueError):
+                provided_duration = None
+
+        if provided_duration and provided_duration > 0:
+            duration = provided_duration
+            logger.info(f"[UPLOAD] Duration (client): {duration:.2f}s for {file.filename}")
+        else:
+            duration = get_video_duration(local_path)
+            logger.info(f"[UPLOAD] Duration (server): {duration:.2f}s for {file.filename}")
 
         if duration <= 0:
             logger.error(f"[UPLOAD] Duration is 0 — SKIPPING clip {file.filename}")

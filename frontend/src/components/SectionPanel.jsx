@@ -118,6 +118,30 @@ const styles = {
     textDecoration: 'underline',
     textUnderlineOffset: 3,
   },
+  opsBody: {
+    marginTop: 12,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+  },
+  opsRow: {
+    display: 'flex',
+    gap: 8,
+  },
+  splitRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  opBtn: {
+    padding: '9px 12px',
+    background: 'rgba(255,255,255,0.06)',
+    color: T.ink,
+    borderRadius: 8,
+    border: `1px solid ${T.stroke}`,
+    fontSize: 12,
+    cursor: 'pointer',
+  },
   select: {
     width: '100%',
     background: 'rgba(255,255,255,0.06)',
@@ -242,12 +266,18 @@ function truncate(str, len = 80) {
 export default function SectionPanel({
   section,
   project,
+  sections,
+  clips,
   onUpdateSection,
   onGenerateMusic,
   onRegenerateMusic,
+  onEditBrief,
+  onMergeSections,
+  onSplitSection,
 }) {
   const [briefOpen, setBriefOpen] = useState(true);
   const [feedback, setFeedback] = useState('');
+  const [splitClipId, setSplitClipId] = useState('');
 
   /* ── empty state ── */
   if (!section) {
@@ -261,6 +291,17 @@ export default function SectionPanel({
   const isGenerating = section.music_status === 'GENERATING';
   const isReady = section.music_status === 'READY';
   const track = section.generated_track;
+
+  const orderedSections = sections
+    ? [...sections].sort((a, b) => a.section_order - b.section_order)
+    : [];
+  const sectionIndex = orderedSections.findIndex((s) => s.id === section.id);
+  const hasPrev = sectionIndex > 0;
+  const hasNext = sectionIndex >= 0 && sectionIndex < orderedSections.length - 1;
+
+  const clipOptions = (section.clip_ids || [])
+    .map((id) => clips?.find((c) => c.id === id))
+    .filter(Boolean);
 
   function handleFieldChange(field, value) {
     if (onUpdateSection) {
@@ -327,7 +368,7 @@ export default function SectionPanel({
                   style={styles.editLink}
                   onClick={(e) => {
                     e.stopPropagation();
-                    console.log('Edit Brief clicked');
+                    onEditBrief?.();
                   }}
                 >
                   Edit Brief
@@ -336,6 +377,53 @@ export default function SectionPanel({
             )}
           </div>
         )}
+
+        {/* ──────── 1.5 Section Operations ──────── */}
+        <div style={styles.card}>
+          <div style={styles.cardHeader}>
+            <span style={styles.cardTitle}>Section Operations</span>
+          </div>
+          <div style={styles.opsBody}>
+            <div style={styles.opsRow}>
+              <button
+                style={{ ...styles.opBtn, opacity: hasPrev ? 1 : 0.4 }}
+                onClick={() => hasPrev && onMergeSections?.(section.id, 'prev')}
+                disabled={!hasPrev}
+              >
+                Merge Previous
+              </button>
+              <button
+                style={{ ...styles.opBtn, opacity: hasNext ? 1 : 0.4 }}
+                onClick={() => hasNext && onMergeSections?.(section.id, 'next')}
+                disabled={!hasNext}
+              >
+                Merge Next
+              </button>
+            </div>
+            <div style={styles.splitRow}>
+              <label style={labelStyle}>Split At Clip</label>
+              <select
+                style={styles.select}
+                value={splitClipId}
+                onChange={(e) => setSplitClipId(e.target.value)}
+              >
+                <option value="">Select clip boundary</option>
+                {clipOptions.map((clip, idx) => (
+                  <option key={clip.id} value={clip.id}>
+                    {idx + 1}. {truncate(clip.filename)}
+                  </option>
+                ))}
+              </select>
+              <button
+                style={styles.opBtn}
+                onClick={() => onSplitSection?.(section.id, splitClipId)}
+                disabled={!splitClipId}
+              >
+                Split Section
+              </button>
+            </div>
+          </div>
+        </div>
 
         {/* ──────── 2. Section Details ──────── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

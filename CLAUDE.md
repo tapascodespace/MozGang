@@ -66,3 +66,6 @@ Run `python backend/setup_db.py` to check Supabase tables. If missing, paste `su
 ## Build Phases
 - **Phase 1**: Full UI with mocked AI (auto-segmentation, placeholder values)
 - **Phase 2**: Wire up real AI (GPT-4o Vision, ElevenLabs music gen + STT)
+
+## Current Product Limitations (UI)
+- Merge/split is limited to section-level operations (no clip trimming UI).

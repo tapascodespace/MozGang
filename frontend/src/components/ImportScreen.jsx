@@ -38,6 +38,22 @@ export default function ImportScreen({ onComplete }) {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const getFileDuration = (file) => new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      URL.revokeObjectURL(url);
+      resolve(duration);
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(0);
+    };
+    video.src = url;
+  });
+
   const handleUpload = async () => {
     if (files.length === 0) {
       toast.error('Please add at least one video clip.');
@@ -52,6 +68,14 @@ export default function ImportScreen({ onComplete }) {
       const { data: project } = await createProject();
       const projectId = project.id;
 
+      toast.loading('Preparing clips...', { id: 'upload' });
+
+      const durations = await Promise.all(files.map(getFileDuration));
+      const hasAnyDuration = durations.some((d) => d > 0);
+      if (!hasAnyDuration) {
+        console.warn('Could not read any clip durations on client; server will estimate.');
+      }
+
       toast.loading('Uploading clips...', { id: 'upload' });
 
       // Simulate progress while uploading
@@ -65,7 +89,7 @@ export default function ImportScreen({ onComplete }) {
         });
       }, 400);
 
-      const { data: clips } = await uploadClips(projectId, files);
+      const { data: clips } = await uploadClips(projectId, files, durations);
 
       clearInterval(progressInterval);
       setProgress(100);

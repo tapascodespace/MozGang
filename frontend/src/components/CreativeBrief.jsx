@@ -1,12 +1,19 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import { submitBrief } from '../services/api';
+import { submitBrief, updateBrief } from '../services/api';
 
-export default function CreativeBrief({ project, clips, onComplete }) {
+export default function CreativeBrief({
+  project,
+  clips,
+  onComplete,
+  mode = 'create',
+  onCancel,
+  onUpdate,
+}) {
   const projectId = project?.id;
-  const [overallEnergy, setOverallEnergy] = useState('');
-  const [musicStyle, setMusicStyle] = useState('');
-  const [references, setReferences] = useState('');
+  const [overallEnergy, setOverallEnergy] = useState(project?.overall_energy || '');
+  const [musicStyle, setMusicStyle] = useState(project?.music_style_direction || '');
+  const [references, setReferences] = useState(project?.references_text || '');
   const [submitting, setSubmitting] = useState(false);
 
   const isValid = overallEnergy.trim() !== '' && musicStyle.trim() !== '';
@@ -22,19 +29,26 @@ export default function CreativeBrief({ project, clips, onComplete }) {
     setSubmitting(true);
 
     try {
-      toast.loading('Analyzing your brief...', { id: 'brief' });
-
       const brief = {
         overall_energy: overallEnergy.trim(),
         music_style_direction: musicStyle.trim(),
         references_text: references.trim() || null,
       };
 
+      if (mode === 'edit') {
+        toast.loading('Updating your brief...', { id: 'brief' });
+        await updateBrief(projectId, brief);
+        toast.success('Brief updated!', { id: 'brief' });
+        onUpdate?.(brief);
+        setSubmitting(false);
+        return;
+      }
+
+      toast.loading('Analyzing your brief...', { id: 'brief' });
       const { data } = await submitBrief(projectId, brief);
       const sections = data.sections || data;
 
       toast.success('Brief submitted!', { id: 'brief' });
-
       onComplete(sections);
     } catch (err) {
       console.error('Brief submission failed:', err);
@@ -103,17 +117,31 @@ export default function CreativeBrief({ project, clips, onComplete }) {
           </div>
 
           {/* Submit */}
-          <button
-            type="submit"
-            disabled={!isValid || submitting}
-            style={{
-              ...styles.submitBtn,
-              opacity: !isValid || submitting ? 0.4 : 1,
-              cursor: !isValid || submitting ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {submitting ? 'Analyzing...' : 'Score My Video \u2192'}
-          </button>
+          <div style={styles.actions}>
+            {mode === 'edit' && (
+              <button
+                type="button"
+                style={styles.cancelBtn}
+                onClick={onCancel}
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+            )}
+            <button
+              type="submit"
+              disabled={!isValid || submitting}
+              style={{
+                ...styles.submitBtn,
+                opacity: !isValid || submitting ? 0.4 : 1,
+                cursor: !isValid || submitting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {submitting
+                ? (mode === 'edit' ? 'Updating...' : 'Analyzing...')
+                : (mode === 'edit' ? 'Update Brief' : 'Score My Video \u2192')}
+            </button>
+          </div>
         </form>
       </div>
     </div>
@@ -218,6 +246,22 @@ const styles = {
     border: 'none',
     transition: 'opacity 0.2s, transform 0.15s',
     fontFamily: "'DM Sans', sans-serif",
-    alignSelf: 'flex-end',
+  },
+  actions: {
+    display: 'flex',
+    gap: 10,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  cancelBtn: {
+    padding: '12px 16px',
+    background: 'transparent',
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 14,
+    borderRadius: 10,
+    border: '1px solid rgba(255,255,255,0.2)',
+    fontFamily: "'DM Sans', sans-serif",
+    cursor: 'pointer',
   },
 };
