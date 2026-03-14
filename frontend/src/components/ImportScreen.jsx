@@ -1,5 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Upload, X, Film, Link } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { createProject, uploadClips } from '../services/api';
 
@@ -15,6 +17,39 @@ const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const formatSize = (bytes) => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+// Stagger animation variants
+const containerVariants = {
+  hidden: {},
+  visible: {
+    transition: {
+      staggerChildren: 0.12,
+    },
+  },
+};
+
+const fadeSlideUp = {
+  hidden: { opacity: 0, y: 24 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+  },
+};
+
+const fileCardVariants = {
+  initial: { opacity: 0, x: -40 },
+  animate: {
+    opacity: 1,
+    x: 0,
+    transition: { duration: 0.35, ease: [0.22, 1, 0.36, 1] },
+  },
+  exit: {
+    opacity: 0,
+    x: 60,
+    transition: { duration: 0.25, ease: [0.55, 0, 1, 0.45] },
+  },
 };
 
 export default function ImportScreen({ onComplete }) {
@@ -132,101 +167,202 @@ export default function ImportScreen({ onComplete }) {
 
   return (
     <div style={styles.wrapper}>
-      <div style={styles.container}>
-        <h1 style={styles.title}>ScoreFlow</h1>
-        <p style={styles.subtitle}>AI-powered music scoring for your video</p>
+      {/* Floating gradient orb */}
+      <motion.div
+        style={styles.gradientOrb}
+        animate={{
+          x: [0, 30, -20, 10, 0],
+          y: [0, -25, 15, -10, 0],
+          scale: [1, 1.1, 0.95, 1.05, 1],
+        }}
+        transition={{
+          duration: 12,
+          repeat: Infinity,
+          ease: 'easeInOut',
+        }}
+      />
+      <motion.div
+        style={styles.gradientOrbSecondary}
+        animate={{
+          x: [0, -20, 25, -15, 0],
+          y: [0, 20, -30, 10, 0],
+          scale: [1, 0.95, 1.1, 1.0, 1],
+        }}
+        transition={{
+          duration: 16,
+          repeat: Infinity,
+          ease: 'easeInOut',
+        }}
+      />
+
+      <motion.div
+        style={styles.container}
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        {/* Title */}
+        <motion.h1 style={styles.title} variants={fadeSlideUp}>
+          ScoreFlow
+        </motion.h1>
+
+        {/* Subtitle */}
+        <motion.p style={styles.subtitle} variants={fadeSlideUp}>
+          AI-powered music scoring for your video
+        </motion.p>
 
         {/* Drop zone */}
-        <div
-          {...getRootProps()}
-          style={{
-            ...styles.dropzone,
-            borderColor: isDragActive ? '#45f5c5' : 'rgba(255,255,255,0.08)',
-            background: isDragActive ? 'rgba(69,245,197,0.06)' : '#13151a',
-          }}
+        <motion.div
+          variants={fadeSlideUp}
+          whileHover={{ scale: 1.015 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+          style={{ width: '100%' }}
         >
-          <input {...getInputProps()} />
-          <div style={styles.dropContent}>
-            <div style={styles.dropIcon}>
-              <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                <path
-                  d="M24 32V16M24 16L18 22M24 16L30 22"
-                  stroke={isDragActive ? '#45f5c5' : 'rgba(255,255,255,0.4)'}
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+          <motion.div
+            {...getRootProps()}
+            style={{
+              ...styles.dropzone,
+              borderColor: isDragActive ? '#45f5c5' : 'rgba(255,255,255,0.08)',
+              background: isDragActive ? 'rgba(69,245,197,0.06)' : '#13151a',
+            }}
+            animate={
+              isDragActive
+                ? {
+                    boxShadow: [
+                      '0 0 0px rgba(69,245,197,0)',
+                      '0 0 30px rgba(69,245,197,0.25)',
+                      '0 0 0px rgba(69,245,197,0)',
+                    ],
+                  }
+                : { boxShadow: '0 0 0px rgba(69,245,197,0)' }
+            }
+            transition={
+              isDragActive
+                ? { duration: 1.5, repeat: Infinity, ease: 'easeInOut' }
+                : { duration: 0.3 }
+            }
+          >
+            <input {...getInputProps()} />
+            <div style={styles.dropContent}>
+              <div style={styles.dropIcon}>
+                <Upload
+                  size={48}
+                  strokeWidth={1.5}
+                  color={isDragActive ? '#45f5c5' : 'rgba(255,255,255,0.4)'}
                 />
-                <path
-                  d="M8 33V36C8 38.2091 9.79086 40 12 40H36C38.2091 40 40 38.2091 40 36V33"
-                  stroke={isDragActive ? '#45f5c5' : 'rgba(255,255,255,0.4)'}
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              </div>
+              <p style={styles.dropText}>
+                {isDragActive ? 'Drop your clips here' : 'Drop your video clips here'}
+              </p>
+              <p style={styles.dropHint}>MP4, MOV, WebM accepted &bull; Max {MAX_FILE_SIZE_MB}MB per file</p>
             </div>
-            <p style={styles.dropText}>
-              {isDragActive ? 'Drop your clips here' : 'Drop your video clips here'}
-            </p>
-            <p style={styles.dropHint}>MP4, MOV, WebM accepted • Max {MAX_FILE_SIZE_MB}MB per file</p>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
 
         {/* File list */}
-        {files.length > 0 && (
-          <div style={styles.fileList}>
-            {files.map((file, index) => (
-              <div key={`${file.name}-${index}`} style={styles.fileItem}>
-                <div style={styles.fileInfo}>
-                  <span style={styles.fileName}>{file.name}</span>
-                  <span style={styles.fileSize}>{formatSize(file.size)}</span>
-                </div>
-                {!uploading && (
-                  <button
-                    style={styles.removeBtn}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeFile(index);
-                    }}
+        <AnimatePresence mode="popLayout">
+          {files.length > 0 && (
+            <motion.div
+              style={styles.fileList}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <AnimatePresence mode="popLayout">
+                {files.map((file, index) => (
+                  <motion.div
+                    key={`${file.name}-${file.size}-${file.lastModified}`}
+                    layoutId={`${file.name}-${file.size}-${file.lastModified}`}
+                    variants={fileCardVariants}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    layout
+                    style={styles.fileItem}
                   >
-                    x
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+                    <div style={styles.fileInfo}>
+                      <Film
+                        size={16}
+                        color="rgba(255,255,255,0.4)"
+                        style={{ flexShrink: 0 }}
+                      />
+                      <span style={styles.fileName}>{file.name}</span>
+                      <span style={styles.fileSize}>{formatSize(file.size)}</span>
+                    </div>
+                    {!uploading && (
+                      <motion.button
+                        style={styles.removeBtn}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeFile(index);
+                        }}
+                        whileHover={{ color: '#ff5f5f', scale: 1.15 }}
+                        whileTap={{ scale: 0.9 }}
+                      >
+                        <X size={16} />
+                      </motion.button>
+                    )}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Upload progress */}
-        {uploading && (
-          <div style={styles.progressWrapper}>
-            <div style={styles.progressTrack}>
-              <div
-                style={{
-                  ...styles.progressBar,
-                  width: `${progress}%`,
-                }}
-              />
-            </div>
-            <span style={styles.progressLabel}>{progress}%</span>
-          </div>
-        )}
+        <AnimatePresence>
+          {uploading && (
+            <motion.div
+              style={styles.progressWrapper}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.3 }}
+            >
+              <div style={styles.progressTrack}>
+                <motion.div
+                  style={styles.progressBar}
+                  initial={{ width: '0%' }}
+                  animate={{ width: `${progress}%` }}
+                  transition={{ duration: 0.4, ease: 'easeOut' }}
+                />
+              </div>
+              <span style={styles.progressLabel}>{progress}%</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Upload button */}
-        {files.length > 0 && !uploading && (
-          <button style={styles.uploadBtn} onClick={handleUpload}>
-            Upload & Continue
-          </button>
-        )}
+        <AnimatePresence>
+          {files.length > 0 && !uploading && (
+            <motion.button
+              style={styles.uploadBtn}
+              onClick={handleUpload}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+            >
+              Upload &amp; Continue
+            </motion.button>
+          )}
+        </AnimatePresence>
 
         {/* URL paste field (disabled) */}
-        <div style={styles.urlSection}>
+        <motion.div style={styles.urlSection} variants={fadeSlideUp}>
           <div style={styles.dividerRow}>
             <div style={styles.dividerLine} />
             <span style={styles.dividerText}>or</span>
             <div style={styles.dividerLine} />
           </div>
           <div style={styles.urlFieldWrapper} title="Coming soon">
+            <Link
+              size={16}
+              color="rgba(255,255,255,0.2)"
+              style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', zIndex: 1 }}
+            />
             <input
               type="text"
               placeholder="Paste YouTube / TikTok URL"
@@ -235,8 +371,8 @@ export default function ImportScreen({ onComplete }) {
             />
             <span style={styles.comingSoonBadge}>Coming soon</span>
           </div>
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
     </div>
   );
 }
@@ -250,6 +386,30 @@ const styles = {
     justifyContent: 'center',
     background: '#0b0c10',
     fontFamily: "'DM Sans', sans-serif",
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  gradientOrb: {
+    position: 'absolute',
+    width: 500,
+    height: 500,
+    borderRadius: '50%',
+    background: 'radial-gradient(circle, rgba(69,245,197,0.08) 0%, rgba(69,245,197,0) 70%)',
+    top: '-10%',
+    left: '-5%',
+    pointerEvents: 'none',
+    filter: 'blur(40px)',
+  },
+  gradientOrbSecondary: {
+    position: 'absolute',
+    width: 400,
+    height: 400,
+    borderRadius: '50%',
+    background: 'radial-gradient(circle, rgba(69,100,245,0.06) 0%, rgba(69,100,245,0) 70%)',
+    bottom: '-10%',
+    right: '-5%',
+    pointerEvents: 'none',
+    filter: 'blur(40px)',
   },
   container: {
     width: '100%',
@@ -258,7 +418,8 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    animation: 'fadeIn 0.4s ease-out',
+    position: 'relative',
+    zIndex: 1,
   },
   title: {
     fontFamily: "'DM Serif Display', serif",
@@ -283,7 +444,7 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
-    transition: 'all 0.25s ease',
+    transition: 'border-color 0.25s ease, background 0.25s ease',
   },
   dropContent: {
     display: 'flex',
@@ -344,12 +505,13 @@ const styles = {
     background: 'none',
     border: 'none',
     color: 'rgba(255,255,255,0.35)',
-    fontSize: 16,
     cursor: 'pointer',
     padding: '2px 8px',
     borderRadius: 4,
     lineHeight: 1,
-    transition: 'color 0.2s',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   progressWrapper: {
     width: '100%',
@@ -369,7 +531,6 @@ const styles = {
     height: '100%',
     background: '#45f5c5',
     borderRadius: 3,
-    transition: 'width 0.3s ease',
   },
   progressLabel: {
     fontSize: 13,
@@ -388,7 +549,6 @@ const styles = {
     borderRadius: 10,
     border: 'none',
     cursor: 'pointer',
-    transition: 'opacity 0.2s, transform 0.15s',
     fontFamily: "'DM Sans', sans-serif",
   },
   urlSection: {
@@ -418,6 +578,7 @@ const styles = {
   urlInput: {
     width: '100%',
     padding: '12px 14px',
+    paddingLeft: 40,
     paddingRight: 110,
     background: 'rgba(255,255,255,0.03)',
     border: '1px solid rgba(255,255,255,0.06)',

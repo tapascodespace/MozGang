@@ -1,4 +1,6 @@
 import React, { useRef, useCallback, useMemo, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Scissors, ZoomIn, ZoomOut, Merge } from 'lucide-react';
 
 // ── Design Tokens ──────────────────────────────────────────────────────────────
 const TOKEN = {
@@ -429,9 +431,9 @@ export default function Timeline({
       const color = SECTION_COLORS[sec.section_type] || '#666';
       const isSelected = sec.id === selectedSectionId;
 
-      // Add section block
+      // Add section block with motion wrapper
       elements.push(
-        <div
+        <motion.div
           key={sec.id ?? i}
           onClick={() => onSelectSection && onSelectSection(sec.id)}
           style={{
@@ -442,10 +444,21 @@ export default function Timeline({
               ? '2px solid #ffffff'
               : `1px solid ${color}88`,
           }}
+          whileHover={{
+            scale: 1.03,
+            boxShadow: `0 0 12px ${color}66`,
+          }}
+          whileTap={{ scale: 0.98 }}
+          animate={isSelected ? {
+            borderColor: ['#ffffff', TOKEN.accent, '#ffffff'],
+          } : {}}
+          transition={isSelected ? {
+            borderColor: { duration: 1.5, repeat: Infinity, ease: 'easeInOut' },
+          } : { type: 'spring', stiffness: 400, damping: 25 }}
         >
           <span style={{ ...S.blockLabel, color }}>{sec.section_type}</span>
           <span style={S.durationLabel}>{formatDuration(sec.duration)}</span>
-        </div>
+        </motion.div>
       );
 
       // Add merge button between sections (after this section, before next)
@@ -467,7 +480,7 @@ export default function Timeline({
             }}
             title="Merge sections"
           >
-            <div className="merge-btn" style={S.mergeBtn}>⟷</div>
+            <div className="merge-btn" style={S.mergeBtn}><Merge size={10} /></div>
           </div>
         );
       }
@@ -487,9 +500,25 @@ export default function Timeline({
 
       const bg = status === 'READY' ? sectionColor + '33' : (cfg.bg || '#2a2a2a');
       const border = status === 'READY' ? `1px solid ${sectionColor}88` : cfg.border;
-      const animation = cfg.pulse
-        ? 'scoreflow-pulse 1.8s ease-in-out infinite'
-        : 'none';
+
+      // Use framer-motion for GENERATING pulse instead of CSS keyframes
+      if (cfg.pulse) {
+        return (
+          <motion.div
+            key={sec.id ?? `m-${i}`}
+            style={{
+              ...S.musicBlock,
+              width: w,
+              background: bg,
+              border,
+            }}
+            animate={{ opacity: [1, 0.55, 1] }}
+            transition={{ duration: 1.8, ease: 'easeInOut', repeat: Infinity }}
+          >
+            <span style={S.blockLabel}>{cfg.label}</span>
+          </motion.div>
+        );
+      }
 
       return (
         <div
@@ -499,7 +528,6 @@ export default function Timeline({
             width: w,
             background: bg,
             border,
-            animation,
           }}
         >
           <span style={S.blockLabel}>{cfg.label}</span>
@@ -551,60 +579,70 @@ export default function Timeline({
           Right-click to split
         </span>
         <div style={{ flex: 1 }} />
-        <button
+        <motion.button
           type="button"
           style={S.zoomBtn}
           onClick={() => handleZoom(-2)}
           aria-label="Zoom out"
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
         >
-          &minus;
-        </button>
+          <ZoomOut size={14} />
+        </motion.button>
         <span style={{ fontSize: 10, color: TOKEN.text, minWidth: 42, textAlign: 'center' }}>
           Zoom {zoomLevel}x
         </span>
-        <button
+        <motion.button
           type="button"
           style={S.zoomBtn}
           onClick={() => handleZoom(2)}
           aria-label="Zoom in"
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
         >
-          +
-        </button>
+          <ZoomIn size={14} />
+        </motion.button>
       </div>
 
       {/* Context Menu */}
-      {contextMenu && (
-        <>
-          {/* Backdrop to close menu */}
-          <div
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              zIndex: 999,
-            }}
-            onClick={handleCloseContextMenu}
-          />
-          <div
-            style={{
-              ...S.contextMenu,
-              left: contextMenu.x,
-              top: contextMenu.y,
-            }}
-          >
-            <button
-              style={S.contextMenuItem}
-              onClick={handleSplitHere}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
+      <AnimatePresence>
+        {contextMenu && (
+          <>
+            {/* Backdrop to close menu */}
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 999,
+              }}
+              onClick={handleCloseContextMenu}
+            />
+            <motion.div
+              style={{
+                ...S.contextMenu,
+                left: contextMenu.x,
+                top: contextMenu.y,
+              }}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ duration: 0.15, ease: 'easeOut' }}
             >
-              ✂️ Split here ({contextMenu.time.toFixed(2)}s)
-            </button>
-          </div>
-        </>
-      )}
+              <button
+                style={S.contextMenuItem}
+                onClick={handleSplitHere}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
+              >
+                <Scissors size={14} /> Split here ({contextMenu.time.toFixed(2)}s)
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

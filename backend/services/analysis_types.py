@@ -9,7 +9,7 @@ Types match exactly with PRD Section 5 (Enums) and Section 8.4 (GPT-4o output).
 """
 
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Union
 
 # ============================================================================
 # ENUMS FROM PRD SECTION 5 - USE THESE EXACT VALUES
@@ -102,7 +102,7 @@ class CreativeBrief(BaseModel):
 # MUSIC GENERATION (PRD Section 8.6)
 # ============================================================================
 
-def _float_to_energy_level(energy: float | str) -> str:
+def _float_to_energy_level(energy: Union[float, str]) -> str:
     """Convert energy level float back to string for prompts."""
     if isinstance(energy, str):
         return energy

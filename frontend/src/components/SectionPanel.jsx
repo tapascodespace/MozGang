@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ChevronDown, Sparkles, RefreshCw, Music, Pencil, Zap, Eye, Palette, Gauge, Activity } from 'lucide-react';
 
 /* ── design tokens ── */
 const T = {
@@ -61,17 +63,20 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'column',
     height: '100%',
     color: T.muted,
     fontSize: 14,
     textAlign: 'center',
     padding: 24,
+    gap: 12,
   },
   card: {
     background: 'rgba(255,255,255,0.03)',
     border: `1px solid ${T.stroke}`,
     borderRadius: 10,
     padding: '14px 14px',
+    overflow: 'hidden',
   },
   cardHeader: {
     display: 'flex',
@@ -85,13 +90,7 @@ const styles = {
     marginBottom: 0,
     fontSize: 11,
   },
-  chevron: {
-    color: T.muted2,
-    fontSize: 10,
-    transition: 'transform 0.2s',
-  },
   briefBody: {
-    marginTop: 12,
     display: 'flex',
     flexDirection: 'column',
     gap: 8,
@@ -117,6 +116,9 @@ const styles = {
     marginTop: 4,
     textDecoration: 'underline',
     textUnderlineOffset: 3,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
   },
   select: {
     width: '100%',
@@ -135,6 +137,7 @@ const styles = {
     backgroundRepeat: 'no-repeat',
     backgroundPosition: 'right 10px center',
     backgroundSize: '10px 6px',
+    transition: 'border-color 0.2s',
   },
   badge: {
     display: 'inline-block',
@@ -157,8 +160,8 @@ const styles = {
   },
   generateBtn: {
     width: '100%',
-    padding: '10px 0',
-    borderRadius: 8,
+    padding: '12px 0',
+    borderRadius: 10,
     border: 'none',
     background: T.accent,
     color: '#0a0b0d',
@@ -166,15 +169,16 @@ const styles = {
     fontSize: 14,
     cursor: 'pointer',
     letterSpacing: '0.02em',
-    transition: 'opacity 0.15s',
-  },
-  generateBtnDisabled: {
-    opacity: 0.45,
-    cursor: 'not-allowed',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    position: 'relative',
+    overflow: 'hidden',
   },
   regenerateBtn: {
     width: '100%',
-    padding: '9px 0',
+    padding: '10px 0',
     borderRadius: 8,
     border: `1px solid ${T.stroke}`,
     background: 'rgba(255,255,255,0.06)',
@@ -182,7 +186,10 @@ const styles = {
     fontWeight: 500,
     fontSize: 13,
     cursor: 'pointer',
-    transition: 'background 0.15s',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
   },
   feedbackInput: {
     width: '100%',
@@ -196,6 +203,7 @@ const styles = {
     resize: 'none',
     fontFamily: 'inherit',
     boxSizing: 'border-box',
+    transition: 'border-color 0.2s',
   },
   pill: (bg) => ({
     display: 'inline-block',
@@ -238,6 +246,33 @@ function truncate(str, len = 80) {
   return str.length > len ? str.slice(0, len) + '...' : str;
 }
 
+/* ── sub-components ── */
+function GeneratingWaveform() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: 16 }}>
+      {[...Array(5)].map((_, i) => (
+        <motion.div
+          key={i}
+          style={{
+            width: 3,
+            borderRadius: 2,
+            background: '#0a0b0d',
+          }}
+          animate={{
+            height: [4, 14, 6, 12, 4],
+          }}
+          transition={{
+            duration: 1,
+            repeat: Infinity,
+            delay: i * 0.12,
+            ease: 'easeInOut',
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 /* ── component ── */
 export default function SectionPanel({
   section,
@@ -254,7 +289,20 @@ export default function SectionPanel({
   if (!section) {
     return (
       <aside style={styles.root}>
-        <div style={styles.emptyState}>Select a section on the timeline.</div>
+        <motion.div
+          style={styles.emptyState}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.4 }}
+        >
+          <motion.div
+            animate={{ y: [0, -6, 0] }}
+            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <Music size={32} color={T.muted2} />
+          </motion.div>
+          <span>Select a section on the timeline</span>
+        </motion.div>
       </aside>
     );
   }
@@ -282,208 +330,275 @@ export default function SectionPanel({
     }
   }
 
+  const fieldVariants = {
+    hidden: { opacity: 0, x: -10 },
+    visible: (i) => ({
+      opacity: 1,
+      x: 0,
+      transition: { delay: i * 0.05, duration: 0.3 },
+    }),
+  };
+
   return (
     <aside style={styles.root}>
-      <div style={styles.scrollArea}>
-
-        {/* ──────── 1. Creative Brief Summary ──────── */}
-        {project && (
-          <div style={styles.card}>
-            <div
-              style={styles.cardHeader}
-              onClick={() => setBriefOpen((o) => !o)}
-            >
-              <span style={styles.cardTitle}>Creative Brief</span>
-              <span
-                style={{
-                  ...styles.chevron,
-                  transform: briefOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                }}
-              >
-                ▾
-              </span>
-            </div>
-
-            {briefOpen && (
-              <div style={styles.briefBody}>
-                <div style={styles.briefRow}>
-                  <span style={labelStyle}>Overall Energy</span>
-                  <span style={styles.briefValue}>
-                    {project.overall_energy ?? '—'}
-                  </span>
-                </div>
-                <div style={styles.briefRow}>
-                  <span style={labelStyle}>Music Style Direction</span>
-                  <span style={styles.briefValue}>
-                    {truncate(project.music_style_direction)}
-                  </span>
-                </div>
-                <div style={styles.briefRow}>
-                  <span style={labelStyle}>References</span>
-                  <span style={styles.briefValue}>
-                    {truncate(project.references_text)}
-                  </span>
-                </div>
-                <button
-                  style={styles.editLink}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onEditBrief?.();
-                  }}
-                >
-                  Edit Brief
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ──────── 2. Section Details ──────── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <span style={{ ...labelStyle, marginBottom: 0 }}>
-            Section Details
-          </span>
-
-          {/* section_type – dropdown */}
-          <div style={styles.fieldGroup}>
-            <label style={labelStyle}>Section Type</label>
-            <select
-              style={styles.select}
-              value={section.section_type || ''}
-              onChange={(e) => handleFieldChange('section_type', e.target.value)}
-            >
-              {SECTION_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* scene_type – read-only badge */}
-          <div style={styles.fieldGroup}>
-            <span style={labelStyle}>Scene Type</span>
-            <span style={styles.badge}>{section.scene_type ?? '—'}</span>
-          </div>
-
-          {/* emotional_tone – dropdown */}
-          <div style={styles.fieldGroup}>
-            <label style={labelStyle}>Emotional Tone</label>
-            <select
-              style={styles.select}
-              value={section.emotional_tone || ''}
-              onChange={(e) =>
-                handleFieldChange('emotional_tone', e.target.value)
-              }
-            >
-              {EMOTIONAL_TONES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* detected_theme – read-only */}
-          <div style={styles.fieldGroup}>
-            <span style={labelStyle}>Detected Theme</span>
-            <span style={styles.readOnly}>
-              {section.detected_theme ?? '—'}
-            </span>
-          </div>
-
-          {/* dominant_visual – read-only */}
-          <div style={styles.fieldGroup}>
-            <span style={labelStyle}>Dominant Visual</span>
-            <span style={styles.readOnly}>
-              {section.dominant_visual ?? '—'}
-            </span>
-          </div>
-
-          {/* suggested_music_style – read-only */}
-          <div style={styles.fieldGroup}>
-            <span style={labelStyle}>Suggested Music Style</span>
-            <span style={styles.readOnly}>
-              {section.suggested_music_style ?? '—'}
-            </span>
-          </div>
-
-          {/* energy_level – read-only badge */}
-          <div style={styles.fieldGroup}>
-            <span style={labelStyle}>Energy Level</span>
-            <span style={styles.badge}>{section.energy_level ?? '—'}</span>
-          </div>
-
-          {/* pacing – read-only badge */}
-          <div style={styles.fieldGroup}>
-            <span style={labelStyle}>Pacing</span>
-            <span style={styles.badge}>{section.pacing ?? '—'}</span>
-          </div>
-        </div>
-
-        {/* ──────── 3. Generate Music ──────── */}
-        <button
-          style={{
-            ...styles.generateBtn,
-            ...(isGenerating ? styles.generateBtnDisabled : {}),
-          }}
-          disabled={isGenerating}
-          onClick={handleGenerate}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={section.id}
+          style={styles.scrollArea}
+          initial={{ opacity: 0, x: 15 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -15 }}
+          transition={{ duration: 0.25 }}
         >
-          {isGenerating ? 'Generating...' : 'Generate Music'}
-        </button>
 
-        {/* ──────── 5. Feedback input ──────── */}
-        <div style={styles.fieldGroup}>
-          <label style={labelStyle}>Feedback</label>
-          <textarea
-            style={styles.feedbackInput}
-            rows={3}
-            placeholder="Make it more tense, add strings..."
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-          />
-        </div>
-
-        {/* ──────── 4. Regenerate (visible when READY) ──────── */}
-        {isReady && (
-          <button style={styles.regenerateBtn} onClick={handleRegenerate}>
-            Regenerate
-          </button>
-        )}
-
-        {/* ──────── 6. Track info (when READY) ──────── */}
-        {isReady && track && (
-          <div style={styles.trackInfoCard}>
-            <span style={{ ...labelStyle, marginBottom: 0 }}>Track Info</span>
-
-            <div style={styles.trackRow}>
-              {track.duration != null && (
-                <span style={styles.trackStat}>
-                  Duration:{' '}
-                  <span style={styles.trackStatValue}>{track.duration}s</span>
-                </span>
-              )}
-              {track.bpm != null && (
-                <span style={styles.trackStat}>
-                  BPM:{' '}
-                  <span style={styles.trackStatValue}>{track.bpm}</span>
-                </span>
-              )}
-            </div>
-
-            {Array.isArray(track.mood_tags) && track.mood_tags.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-                {track.mood_tags.map((tag) => (
-                  <span key={tag} style={styles.pill()}>
-                    {tag}
-                  </span>
-                ))}
+          {/* ──────── 1. Creative Brief Summary ──────── */}
+          {project && (
+            <div style={styles.card}>
+              <div
+                style={styles.cardHeader}
+                onClick={() => setBriefOpen((o) => !o)}
+              >
+                <span style={styles.cardTitle}>Creative Brief</span>
+                <motion.div
+                  animate={{ rotate: briefOpen ? 180 : 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <ChevronDown size={14} color={T.muted2} />
+                </motion.div>
               </div>
-            )}
+
+              <AnimatePresence initial={false}>
+                {briefOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25 }}
+                    style={{ overflow: 'hidden', marginTop: 12 }}
+                  >
+                    <div style={styles.briefBody}>
+                      <div style={styles.briefRow}>
+                        <span style={labelStyle}>Overall Energy</span>
+                        <span style={styles.briefValue}>
+                          {project.overall_energy ?? '—'}
+                        </span>
+                      </div>
+                      <div style={styles.briefRow}>
+                        <span style={labelStyle}>Music Style Direction</span>
+                        <span style={styles.briefValue}>
+                          {truncate(project.music_style_direction)}
+                        </span>
+                      </div>
+                      <div style={styles.briefRow}>
+                        <span style={labelStyle}>References</span>
+                        <span style={styles.briefValue}>
+                          {truncate(project.references_text)}
+                        </span>
+                      </div>
+                      <motion.button
+                        style={styles.editLink}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditBrief?.();
+                        }}
+                      >
+                        <Pencil size={11} /> Edit Brief
+                      </motion.button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* ──────── 2. Section Details ──────── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <span style={{ ...labelStyle, marginBottom: 0 }}>
+              Section Details
+            </span>
+
+            {/* section_type */}
+            <motion.div style={styles.fieldGroup} custom={0} variants={fieldVariants} initial="hidden" animate="visible">
+              <label style={labelStyle}>Section Type</label>
+              <select
+                style={styles.select}
+                value={section.section_type || ''}
+                onChange={(e) => handleFieldChange('section_type', e.target.value)}
+              >
+                {SECTION_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </motion.div>
+
+            {/* scene_type */}
+            <motion.div style={styles.fieldGroup} custom={1} variants={fieldVariants} initial="hidden" animate="visible">
+              <span style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Eye size={10} /> Scene Type
+              </span>
+              <span style={styles.badge}>{section.scene_type ?? '—'}</span>
+            </motion.div>
+
+            {/* emotional_tone */}
+            <motion.div style={styles.fieldGroup} custom={2} variants={fieldVariants} initial="hidden" animate="visible">
+              <label style={labelStyle}>Emotional Tone</label>
+              <select
+                style={styles.select}
+                value={section.emotional_tone || ''}
+                onChange={(e) => handleFieldChange('emotional_tone', e.target.value)}
+              >
+                {EMOTIONAL_TONES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </motion.div>
+
+            {/* detected_theme */}
+            <motion.div style={styles.fieldGroup} custom={3} variants={fieldVariants} initial="hidden" animate="visible">
+              <span style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Palette size={10} /> Detected Theme
+              </span>
+              <span style={styles.readOnly}>{section.detected_theme ?? '—'}</span>
+            </motion.div>
+
+            {/* dominant_visual */}
+            <motion.div style={styles.fieldGroup} custom={4} variants={fieldVariants} initial="hidden" animate="visible">
+              <span style={labelStyle}>Dominant Visual</span>
+              <span style={styles.readOnly}>{section.dominant_visual ?? '—'}</span>
+            </motion.div>
+
+            {/* suggested_music_style */}
+            <motion.div style={styles.fieldGroup} custom={5} variants={fieldVariants} initial="hidden" animate="visible">
+              <span style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Music size={10} /> Suggested Music Style
+              </span>
+              <span style={styles.readOnly}>{section.suggested_music_style ?? '—'}</span>
+            </motion.div>
+
+            {/* energy_level */}
+            <motion.div style={styles.fieldGroup} custom={6} variants={fieldVariants} initial="hidden" animate="visible">
+              <span style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Zap size={10} /> Energy Level
+              </span>
+              <span style={styles.badge}>{section.energy_level ?? '—'}</span>
+            </motion.div>
+
+            {/* pacing */}
+            <motion.div style={styles.fieldGroup} custom={7} variants={fieldVariants} initial="hidden" animate="visible">
+              <span style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Activity size={10} /> Pacing
+              </span>
+              <span style={styles.badge}>{section.pacing ?? '—'}</span>
+            </motion.div>
           </div>
-        )}
-      </div>
+
+          {/* ──────── 3. Generate Music ──────── */}
+          <motion.button
+            style={{
+              ...styles.generateBtn,
+              ...(isGenerating ? { opacity: 0.7, cursor: 'wait' } : {}),
+            }}
+            disabled={isGenerating}
+            onClick={handleGenerate}
+            whileHover={!isGenerating ? { scale: 1.02, boxShadow: '0 0 20px rgba(69,245,197,0.3)' } : {}}
+            whileTap={!isGenerating ? { scale: 0.98 } : {}}
+          >
+            {isGenerating ? (
+              <>
+                <GeneratingWaveform />
+                <span>Generating...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles size={16} />
+                <span>Generate Music</span>
+              </>
+            )}
+          </motion.button>
+
+          {/* ──────── 5. Feedback input ──────── */}
+          <div style={styles.fieldGroup}>
+            <label style={labelStyle}>Feedback</label>
+            <textarea
+              style={styles.feedbackInput}
+              rows={3}
+              placeholder="Make it more tense, add strings..."
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              onFocus={(e) => { e.target.style.borderColor = T.accent; }}
+              onBlur={(e) => { e.target.style.borderColor = T.stroke; }}
+            />
+          </div>
+
+          {/* ──────── 4. Regenerate (visible when READY) ──────── */}
+          <AnimatePresence>
+            {isReady && (
+              <motion.button
+                style={styles.regenerateBtn}
+                onClick={handleRegenerate}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                whileHover={{ scale: 1.02, background: 'rgba(255,255,255,0.1)' }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <RefreshCw size={14} />
+                Regenerate
+              </motion.button>
+            )}
+          </AnimatePresence>
+
+          {/* ──────── 6. Track info (when READY) ──────── */}
+          <AnimatePresence>
+            {isReady && track && (
+              <motion.div
+                style={styles.trackInfoCard}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 15 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              >
+                <span style={{ ...labelStyle, marginBottom: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Music size={10} /> Track Info
+                </span>
+
+                <div style={styles.trackRow}>
+                  {track.duration != null && (
+                    <span style={styles.trackStat}>
+                      Duration:{' '}
+                      <span style={styles.trackStatValue}>{track.duration}s</span>
+                    </span>
+                  )}
+                  {track.bpm != null && (
+                    <span style={styles.trackStat}>
+                      BPM:{' '}
+                      <span style={styles.trackStatValue}>{track.bpm}</span>
+                    </span>
+                  )}
+                </div>
+
+                {Array.isArray(track.mood_tags) && track.mood_tags.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+                    {track.mood_tags.map((tag, i) => (
+                      <motion.span
+                        key={tag}
+                        style={styles.pill()}
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: i * 0.05 }}
+                      >
+                        {tag}
+                      </motion.span>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      </AnimatePresence>
     </aside>
   );
 }

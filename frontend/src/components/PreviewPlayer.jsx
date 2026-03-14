@@ -1,4 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Play, Pause, Film } from 'lucide-react';
 
 const styles = {
   container: {
@@ -43,7 +45,6 @@ const styles = {
     fontSize: 16,
     border: 'none',
     cursor: 'pointer',
-    transition: 'background 0.2s',
   },
   timeDisplay: {
     fontFamily: "'IBM Plex Mono', monospace",
@@ -68,6 +69,10 @@ const styles = {
     fontFamily: "'IBM Plex Mono', monospace",
     fontSize: 14,
     textAlign: 'center',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 12,
   },
 };
 
@@ -402,14 +407,32 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
 
   if (!clips || clips.length === 0) {
     return (
-      <div style={styles.container}>
-        <div style={styles.placeholder}>No clips loaded</div>
-      </div>
+      <motion.div
+        style={styles.container}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4 }}
+      >
+        <motion.div
+          style={styles.placeholder}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+        >
+          <Film size={32} strokeWidth={1.5} />
+          No clips loaded
+        </motion.div>
+      </motion.div>
     );
   }
 
   return (
-    <div style={styles.container}>
+    <motion.div
+      style={styles.container}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.4 }}
+    >
       <audio ref={audioRef} style={{ display: 'none' }} />
       <video
         ref={videoRef}
@@ -458,17 +481,31 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
         onEnded={handleEnded}
         playsInline
       />
-      <div style={styles.controls}>
-        <button style={styles.playBtn} onClick={togglePlay}>
-          {isPlaying ? '⏸' : '▶'}
-        </button>
+      <motion.div
+        style={styles.controls}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.15 }}
+      >
+        <motion.button
+          style={styles.playBtn}
+          onClick={togglePlay}
+          whileHover={{ scale: 1.15, background: 'rgba(255,255,255,0.25)' }}
+          whileTap={{ scale: 0.9 }}
+        >
+          {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+        </motion.button>
         <div style={styles.timeDisplay}>
           {formatTime(localTime)} / {formatTime(totalDuration)}
         </div>
         <div style={styles.scrubber} onClick={handleScrub}>
-          <div style={{ ...styles.scrubberFill, width: `${progress}%` }} />
+          <motion.div
+            style={styles.scrubberFill}
+            animate={{ width: `${progress}%` }}
+            transition={{ type: 'tween', duration: 0.1 }}
+          />
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

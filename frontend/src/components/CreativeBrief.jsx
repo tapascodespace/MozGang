@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Sparkles, Music } from 'lucide-react';
 import { submitBrief, updateBrief } from '../services/api';
 
 export default function CreativeBrief({
@@ -15,6 +17,7 @@ export default function CreativeBrief({
   const [musicStyle, setMusicStyle] = useState(project?.music_style_direction || '');
   const [references, setReferences] = useState(project?.references_text || '');
   const [submitting, setSubmitting] = useState(false);
+  const [focusedField, setFocusedField] = useState(null);
 
   const isValid = overallEnergy.trim() !== '' && musicStyle.trim() !== '';
 
@@ -59,92 +62,221 @@ export default function CreativeBrief({
     }
   };
 
+  // Stagger children variants
+  const containerVariants = {
+    hidden: {},
+    visible: {
+      transition: {
+        staggerChildren: 0.1,
+      },
+    },
+  };
+
+  const fieldVariants = {
+    hidden: { opacity: 0, y: 16 },
+    visible: {
+      opacity: 1,
+      y: 0,
+      transition: { duration: 0.35, ease: 'easeOut' },
+    },
+  };
+
   return (
-    <div style={styles.overlay}>
-      <div style={styles.modal}>
-        <h2 style={styles.heading}>Creative Brief</h2>
+    <motion.div
+      style={styles.overlay}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.25, ease: 'easeOut' }}
+    >
+      <motion.div
+        style={styles.modal}
+        initial={{ y: 40, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{
+          type: 'spring',
+          stiffness: 300,
+          damping: 28,
+          mass: 0.9,
+        }}
+      >
+        <h2 style={styles.heading}>
+          <Music size={24} style={{ marginRight: 10, verticalAlign: 'middle', color: '#45f5c5' }} />
+          Creative Brief
+        </h2>
         <p style={styles.subtext}>
           Tell us about the vibe. This shapes the music we generate for each section.
         </p>
 
-        <form onSubmit={handleSubmit} style={styles.form}>
+        <motion.form
+          onSubmit={handleSubmit}
+          style={styles.form}
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+        >
           {/* Q1 - Overall Energy */}
-          <div style={styles.field}>
+          <motion.div style={styles.field} variants={fieldVariants}>
             <label style={styles.label}>
               What energy should the video have overall?{' '}
               <span style={styles.required}>*</span>
             </label>
-            <input
-              type="text"
-              value={overallEnergy}
-              onChange={(e) => setOverallEnergy(e.target.value)}
-              placeholder='e.g. "Cinematic and uplifting, building to a peak"'
-              style={styles.input}
-              disabled={submitting}
-            />
-          </div>
+            <div style={{ position: 'relative' }}>
+              <AnimatePresence>
+                {focusedField === 'energy' && (
+                  <motion.div
+                    style={styles.focusGlow}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    layoutId="focusGlow"
+                  />
+                )}
+              </AnimatePresence>
+              <input
+                type="text"
+                value={overallEnergy}
+                onChange={(e) => setOverallEnergy(e.target.value)}
+                onFocus={() => setFocusedField('energy')}
+                onBlur={() => setFocusedField(null)}
+                placeholder='e.g. "Cinematic and uplifting, building to a peak"'
+                style={{
+                  ...styles.input,
+                  borderColor: focusedField === 'energy' ? '#45f5c5' : 'rgba(255,255,255,0.08)',
+                }}
+                disabled={submitting}
+              />
+            </div>
+          </motion.div>
 
           {/* Q2 - Music Style */}
-          <div style={styles.field}>
+          <motion.div style={styles.field} variants={fieldVariants}>
             <label style={styles.label}>
               What music style do you want?{' '}
               <span style={styles.required}>*</span>
             </label>
-            <input
-              type="text"
-              value={musicStyle}
-              onChange={(e) => setMusicStyle(e.target.value)}
-              placeholder='e.g. "Orchestral with modern electronic elements"'
-              style={styles.input}
-              disabled={submitting}
-            />
-          </div>
+            <div style={{ position: 'relative' }}>
+              <AnimatePresence>
+                {focusedField === 'style' && (
+                  <motion.div
+                    style={styles.focusGlow}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                  />
+                )}
+              </AnimatePresence>
+              <input
+                type="text"
+                value={musicStyle}
+                onChange={(e) => setMusicStyle(e.target.value)}
+                onFocus={() => setFocusedField('style')}
+                onBlur={() => setFocusedField(null)}
+                placeholder='e.g. "Orchestral with modern electronic elements"'
+                style={{
+                  ...styles.input,
+                  borderColor: focusedField === 'style' ? '#45f5c5' : 'rgba(255,255,255,0.08)',
+                }}
+                disabled={submitting}
+              />
+            </div>
+          </motion.div>
 
           {/* Q3 - References */}
-          <div style={styles.field}>
+          <motion.div style={styles.field} variants={fieldVariants}>
             <label style={styles.label}>
               Any references or inspiration?{' '}
               <span style={styles.optional}>(optional)</span>
             </label>
-            <textarea
-              value={references}
-              onChange={(e) => setReferences(e.target.value)}
-              placeholder='e.g. "Hans Zimmer, Interstellar soundtrack, lo-fi beats"'
-              rows={3}
-              style={styles.textarea}
-              disabled={submitting}
-            />
-          </div>
+            <div style={{ position: 'relative' }}>
+              <AnimatePresence>
+                {focusedField === 'references' && (
+                  <motion.div
+                    style={styles.focusGlowTextarea}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                  />
+                )}
+              </AnimatePresence>
+              <textarea
+                value={references}
+                onChange={(e) => setReferences(e.target.value)}
+                onFocus={() => setFocusedField('references')}
+                onBlur={() => setFocusedField(null)}
+                placeholder='e.g. "Hans Zimmer, Interstellar soundtrack, lo-fi beats"'
+                rows={3}
+                style={{
+                  ...styles.textarea,
+                  borderColor: focusedField === 'references' ? '#45f5c5' : 'rgba(255,255,255,0.08)',
+                }}
+                disabled={submitting}
+              />
+            </div>
+          </motion.div>
 
           {/* Submit */}
-          <div style={styles.actions}>
+          <motion.div style={styles.actions} variants={fieldVariants}>
             {mode === 'edit' && (
-              <button
+              <motion.button
                 type="button"
                 style={styles.cancelBtn}
                 onClick={onCancel}
                 disabled={submitting}
+                whileHover={{
+                  backgroundColor: 'rgba(255,255,255,0.08)',
+                  transition: { duration: 0.15 },
+                }}
               >
                 Cancel
-              </button>
+              </motion.button>
             )}
-            <button
+            <motion.button
               type="submit"
               disabled={!isValid || submitting}
               style={{
                 ...styles.submitBtn,
                 opacity: !isValid || submitting ? 0.4 : 1,
                 cursor: !isValid || submitting ? 'not-allowed' : 'pointer',
+                position: 'relative',
+                overflow: 'hidden',
               }}
+              whileHover={isValid && !submitting ? { scale: 1.02 } : {}}
+              whileTap={isValid && !submitting ? { scale: 0.98 } : {}}
+              transition={{ type: 'spring', stiffness: 400, damping: 20 }}
             >
-              {submitting
-                ? (mode === 'edit' ? 'Updating...' : 'Analyzing...')
-                : (mode === 'edit' ? 'Update Brief' : 'Score My Video \u2192')}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+              {/* Shimmer glow when valid */}
+              {isValid && !submitting && (
+                <motion.div
+                  style={styles.shimmer}
+                  animate={{
+                    x: ['-100%', '200%'],
+                  }}
+                  transition={{
+                    duration: 2.5,
+                    repeat: Infinity,
+                    repeatDelay: 1.5,
+                    ease: 'easeInOut',
+                  }}
+                />
+              )}
+              <span style={{ position: 'relative', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                {submitting
+                  ? (mode === 'edit' ? 'Updating...' : 'Analyzing...')
+                  : (mode === 'edit' ? 'Update Brief' : (
+                    <>
+                      Score My Video
+                      <Sparkles size={16} />
+                    </>
+                  ))}
+              </span>
+            </motion.button>
+          </motion.div>
+        </motion.form>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -160,7 +292,6 @@ const styles = {
     justifyContent: 'center',
     zIndex: 1000,
     fontFamily: "'DM Sans', sans-serif",
-    animation: 'fadeIn 0.25s ease-out',
   },
   modal: {
     width: '100%',
@@ -169,7 +300,6 @@ const styles = {
     borderRadius: 20,
     border: '1px solid rgba(255,255,255,0.08)',
     padding: '40px 36px',
-    animation: 'slideUp 0.35s ease-out',
   },
   heading: {
     fontFamily: "'DM Serif Display', serif",
@@ -177,6 +307,8 @@ const styles = {
     fontWeight: 400,
     color: '#ffffff',
     marginBottom: 8,
+    display: 'flex',
+    alignItems: 'center',
   },
   subtext: {
     fontSize: 14,
@@ -209,6 +341,8 @@ const styles = {
     fontSize: 13,
   },
   input: {
+    position: 'relative',
+    zIndex: 1,
     width: '100%',
     padding: '12px 14px',
     background: '#0b0c10',
@@ -219,8 +353,11 @@ const styles = {
     outline: 'none',
     transition: 'border-color 0.2s',
     fontFamily: "'DM Sans', sans-serif",
+    boxSizing: 'border-box',
   },
   textarea: {
+    position: 'relative',
+    zIndex: 1,
     width: '100%',
     padding: '12px 14px',
     background: '#0b0c10',
@@ -234,6 +371,28 @@ const styles = {
     lineHeight: 1.5,
     transition: 'border-color 0.2s',
     fontFamily: "'DM Sans', sans-serif",
+    boxSizing: 'border-box',
+  },
+  focusGlow: {
+    position: 'absolute',
+    inset: -2,
+    borderRadius: 12,
+    background: 'transparent',
+    boxShadow: '0 0 12px 2px rgba(69,245,197,0.2), 0 0 4px 1px rgba(69,245,197,0.1)',
+    pointerEvents: 'none',
+    zIndex: 0,
+  },
+  focusGlowTextarea: {
+    position: 'absolute',
+    top: -2,
+    left: -2,
+    right: -2,
+    bottom: -2,
+    borderRadius: 12,
+    background: 'transparent',
+    boxShadow: '0 0 12px 2px rgba(69,245,197,0.2), 0 0 4px 1px rgba(69,245,197,0.1)',
+    pointerEvents: 'none',
+    zIndex: 0,
   },
   submitBtn: {
     marginTop: 8,
@@ -244,8 +403,17 @@ const styles = {
     fontWeight: 600,
     borderRadius: 10,
     border: 'none',
-    transition: 'opacity 0.2s, transform 0.15s',
     fontFamily: "'DM Sans', sans-serif",
+  },
+  shimmer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '50%',
+    height: '100%',
+    background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)',
+    zIndex: 0,
+    pointerEvents: 'none',
   },
   actions: {
     display: 'flex',
