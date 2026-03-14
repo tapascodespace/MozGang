@@ -154,6 +154,8 @@ MUSIC_STATUS   = ["PENDING","GENERATING","READY","FAILED"]
 
 AI must return values from these exact lists. No other values are valid.
 
+**Implementation note:** Database stores `energy_level` as float (0.0-1.0) for compatibility. GPT-4o returns strings which are converted via `_energy_level_to_float()` before storage, and converted back via `_float_to_energy_level()` when building music prompts.
+
 ---
 
 ## 6. UI

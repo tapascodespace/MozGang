@@ -79,7 +79,18 @@ Full UI with mocked AI:
 - Preview plays clips directly, no generated audio
 - Merge/split fully working
 
-### Phase 2 (IN PROGRESS)
+### Phase 2 (COMPLETE)
+
+#### Video Analysis (COMPLETE - merged to main)
+Implemented in `backend/services/analysis_service.py`:
+- Frame extraction with FFmpeg (PRD Section 8.1)
+- Cut density computation (PRD Section 8.2)
+- Audio transcription with ElevenLabs STT (PRD Section 8.3)
+- GPT-4o Vision scene analysis (PRD Section 8.4)
+- Fallback logic when AI fails (PRD Section 8.5)
+- Transcript truncation (3000 chars) to prevent token overflow
+
+**Entry point:** `analyze_video(clips, brief, project_id) -> FullAnalysisResult`
 
 #### Music Generation (COMPLETE - merged to main)
 Implemented in `backend/services/music_service.py`:
@@ -91,21 +102,11 @@ Implemented in `backend/services/music_service.py`:
 
 **Entry point:** `generate_music_for_section(section, brief, project_id) -> GeneratedTrack`
 
-#### Branch: `feature/sentiment-analysis` (IN PROGRESS)
-Implements video analysis in `backend/services/analysis_service.py`:
-- Frame extraction with FFmpeg (PRD Section 8.1)
-- Cut density computation (PRD Section 8.2)
-- Audio transcription with ElevenLabs STT (PRD Section 8.3)
-- GPT-4o Vision scene analysis (PRD Section 8.4)
-- Fallback logic when AI fails (PRD Section 8.5)
-
-**Entry point:** `analyze_video(clips, brief, project_id) -> FullAnalysisResult`
-
 ---
 
 ## Shared Types (PRD Section 5)
 
-Located in `backend/services/analysis_types.py`. Both branches use these exact values:
+Located in `backend/services/analysis_types.py`:
 
 ```python
 SECTION_TYPES = ["Hook","Intro","Setup","Build","Anticipation","Reveal",
