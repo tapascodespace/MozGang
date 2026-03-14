@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(npm create vite@latest . -- --template react)",
-      "Bash(npm install @supabase/supabase-js axios react-dropzone react-hot-toast)"
+      "Bash(npm install @supabase/supabase-js axios react-dropzone react-hot-toast)",
+      "Bash(gh auth status)"
     ]
   }
 }

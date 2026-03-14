@@ -1,13 +1,17 @@
+import logging
 from fastapi import APIRouter, HTTPException
 from database import supabase
 from models import SectionUpdate, MergeRequest, ResizeRequest, SplitRequest, RegenerateRequest
 from config import SECTION_TYPES
+
+logger = logging.getLogger("scoreflow.sections")
 
 router = APIRouter()
 
 
 @router.get("/projects/{project_id}/sections")
 async def get_sections(project_id: str):
+    logger.info(f"[SECTIONS] Fetching sections for project {project_id[:8]}")
     result = supabase.table("sections").select("*").eq(
         "project_id", project_id
     ).order("section_order").execute()
