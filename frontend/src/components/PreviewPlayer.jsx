@@ -84,8 +84,10 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
   const [clipUrls, setClipUrls] = useState([]);
   const [currentClipIndex, setCurrentClipIndex] = useState(0);
   const [localTime, setLocalTime] = useState(0);
-  const userSeeking = useRef(false);
-  const pendingSeek = useRef(null);
+  // Use a timestamp-based guard instead of a simple boolean so we can
+  // ignore onTimeUpdate events that arrive shortly after a seek.
+  const seekingUntil = useRef(0);
+  const lastPropSeek = useRef(0);
 
   // Build clip URLs from storage paths
   useEffect(() => {
@@ -107,20 +109,63 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
     }
   }, [clipUrls]);
 
-  // Handle pending seek after video loads
-  const handleLoadedMetadata = useCallback(() => {
-    if (pendingSeek.current !== null && videoRef.current) {
-      videoRef.current.currentTime = pendingSeek.current;
-      pendingSeek.current = null;
-    }
-  }, []);
+  // React to external currentTime prop changes (from Timeline clicks)
+  useEffect(() => {
+    if (!clips || clips.length === 0 || !clipUrls.length) return;
+    // Only react if the prop differs significantly from our local time
+    // (avoids infinite loop since we also call onTimeUpdate)
+    if (Math.abs(currentTime - localTime) < 0.3) return;
+    // Avoid re-seeking for the same prop value
+    if (Math.abs(currentTime - lastPropSeek.current) < 0.1) return;
+    lastPropSeek.current = currentTime;
+    performSeek(currentTime);
+  }, [currentTime]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleSeeked = useCallback(() => {
-    userSeeking.current = false;
-  }, []);
+  function performSeek(seekTime) {
+    if (!clips || clips.length === 0) return;
+
+    // Block onTimeUpdate for 500ms to let the video settle
+    seekingUntil.current = Date.now() + 500;
+    setLocalTime(seekTime);
+
+    // Find the correct clip for this time
+    let targetIdx = 0;
+    for (let i = 0; i < clips.length; i++) {
+      if (seekTime >= clips[i].start_time && seekTime < clips[i].end_time) {
+        targetIdx = i;
+        break;
+      }
+      if (i === clips.length - 1) targetIdx = i;
+    }
+
+    const offsetInClip = seekTime - clips[targetIdx].start_time;
+
+    if (targetIdx !== currentClipIndex) {
+      setCurrentClipIndex(targetIdx);
+      if (videoRef.current && clipUrls[targetIdx]) {
+        const wasPlaying = isPlaying;
+        videoRef.current.src = clipUrls[targetIdx];
+        videoRef.current.onloadedmetadata = () => {
+          if (!videoRef.current) return;
+          videoRef.current.currentTime = offsetInClip;
+          if (wasPlaying) {
+            videoRef.current.play().catch(() => {});
+          }
+          // Extend the guard a bit more after metadata loads
+          seekingUntil.current = Date.now() + 300;
+        };
+      }
+    } else {
+      if (videoRef.current) {
+        videoRef.current.currentTime = offsetInClip;
+      }
+    }
+  }
 
   const handleTimeUpdate = useCallback(() => {
-    if (!videoRef.current || !clips[currentClipIndex] || userSeeking.current) return;
+    if (!videoRef.current || !clips[currentClipIndex]) return;
+    // Ignore updates while seeking
+    if (Date.now() < seekingUntil.current) return;
     const clipStart = clips[currentClipIndex].start_time;
     const absoluteTime = clipStart + videoRef.current.currentTime;
     setLocalTime(absoluteTime);
@@ -154,54 +199,13 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
     }
   }, [isPlaying, clipUrls, onPlayStateChange]);
 
-  const seekToTime = useCallback((seekTime) => {
-    if (!clips || clips.length === 0) return;
-
-    userSeeking.current = true;
-    setLocalTime(seekTime);
-    onTimeUpdate?.(seekTime);
-
-    // Find the correct clip for this time
-    let targetClipIndex = 0;
-    for (let i = 0; i < clips.length; i++) {
-      if (seekTime >= clips[i].start_time && seekTime < clips[i].end_time) {
-        targetClipIndex = i;
-        break;
-      }
-      if (i === clips.length - 1) targetClipIndex = i;
-    }
-
-    const offsetInClip = seekTime - clips[targetClipIndex].start_time;
-
-    if (targetClipIndex !== currentClipIndex) {
-      // Need to load a different clip
-      setCurrentClipIndex(targetClipIndex);
-      pendingSeek.current = offsetInClip;
-      if (videoRef.current && clipUrls[targetClipIndex]) {
-        const wasPlaying = isPlaying;
-        videoRef.current.src = clipUrls[targetClipIndex];
-        videoRef.current.onloadedmetadata = () => {
-          videoRef.current.currentTime = offsetInClip;
-          if (wasPlaying) {
-            videoRef.current.play().catch(() => {});
-          }
-          userSeeking.current = false;
-        };
-      }
-    } else {
-      // Same clip, just seek
-      if (videoRef.current) {
-        videoRef.current.currentTime = offsetInClip;
-      }
-    }
-  }, [clips, clipUrls, currentClipIndex, isPlaying, onTimeUpdate]);
-
   const handleScrub = useCallback((e) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const seekTime = pct * duration;
-    seekToTime(seekTime);
-  }, [duration, seekToTime]);
+    performSeek(seekTime);
+    onTimeUpdate?.(seekTime);
+  }, [duration, clips, clipUrls, currentClipIndex, isPlaying, onTimeUpdate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const progress = duration > 0 ? (localTime / duration) * 100 : 0;
 
@@ -220,8 +224,6 @@ export default function PreviewPlayer({ clips, currentTime, onTimeUpdate, onPlay
         style={styles.video}
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
-        onLoadedMetadata={handleLoadedMetadata}
-        onSeeked={handleSeeked}
         playsInline
       />
       <div style={styles.controls}>
