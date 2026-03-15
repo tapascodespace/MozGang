@@ -13,4 +13,4 @@ audio/
 exports/
 .DS_Store
 *.egg-info/
-*config.py
+backend/local_config.py
