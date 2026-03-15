@@ -18,7 +18,7 @@ from typing import Optional, List
 SECTION_TYPES = [
     "Hook", "Intro", "Setup", "Build", "Anticipation", "Reveal",
     "Reaction", "Demonstration", "Montage", "Transition", "Recap",
-    "Climax", "Cooldown", "Testimonial", "CTA", "Outro"
+    "Climax", "Cooldown", "Testimonial", "CTA", "Outro", "Scenic"
 ]
 
 SCENE_TYPES = [

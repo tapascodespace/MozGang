@@ -380,6 +380,143 @@ async def _get_video_duration(video_path: str) -> float:
         return 0.0
 
 
+async def _extract_single_frame(clip_path: str, timestamp: float) -> Optional[str]:
+    """
+    Extract a single frame at a specific timestamp from a video file.
+
+    Args:
+        clip_path: Path to video file
+        timestamp: Time in seconds within the clip
+
+    Returns:
+        Base64-encoded JPEG frame, or None on failure
+    """
+    from config import FRAMES_DIR
+
+    temp_path = os.path.join(FRAMES_DIR, f"shot_{uuid.uuid4().hex[:8]}.jpg")
+
+    try:
+        cmd = [
+            "ffmpeg",
+            "-ss", str(max(0, timestamp)),
+            "-i", clip_path,
+            "-frames:v", "1",
+            "-vf", "scale=256:144",
+            "-q:v", "8",
+            "-y",
+            temp_path
+        ]
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        await asyncio.wait_for(process.communicate(), timeout=10)
+
+        if process.returncode == 0 and os.path.exists(temp_path):
+            with open(temp_path, "rb") as f:
+                return base64.b64encode(f.read()).decode("utf-8")
+        return None
+
+    except Exception as e:
+        logger.warning(f"[ANALYSIS] Failed to extract frame at {timestamp:.1f}s: {e}")
+        return None
+    finally:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
+
+
+async def _extract_per_shot_frames(
+    clips: List[dict],
+    scene_changes: List[float],
+    max_frames: int = 16
+) -> List[str]:
+    """
+    Extract one representative frame per shot segment for scenic content.
+
+    Instead of evenly-spaced frames (which may miss distinct shots),
+    this extracts a frame from the midpoint of each shot segment between
+    consecutive cuts. This gives GPT-4o visual coverage of every distinct shot.
+
+    Args:
+        clips: List of clip metadata with start_time, end_time, filename
+        scene_changes: Sorted list of all cut timestamps (absolute timeline)
+        max_frames: Maximum frames to return
+
+    Returns:
+        List of base64-encoded JPEG frames in chronological order
+    """
+    from config import UPLOAD_DIR
+
+    if not scene_changes:
+        return []
+
+    total_duration = max(c.get("end_time", 0) for c in clips) if clips else 0
+    if total_duration <= 0:
+        return []
+
+    # Build shot segments: intervals between consecutive cuts
+    # Include 0 and total_duration as boundaries
+    boundaries = sorted(set([0.0] + list(scene_changes) + [total_duration]))
+    segments = []
+    for i in range(len(boundaries) - 1):
+        seg_start = boundaries[i]
+        seg_end = boundaries[i + 1]
+        duration = seg_end - seg_start
+        if duration >= 0.5:  # Skip very short segments
+            midpoint = (seg_start + seg_end) / 2
+            segments.append({"start": seg_start, "end": seg_end, "mid": midpoint})
+
+    if not segments:
+        return []
+
+    # If too many segments, subsample evenly
+    if len(segments) > max_frames:
+        step = len(segments) / max_frames
+        segments = [segments[int(i * step)] for i in range(max_frames)]
+
+    logger.info(f"[ANALYSIS] Extracting {len(segments)} per-shot frames from {len(scene_changes)} cuts")
+
+    # Extract one frame per segment
+    frames = []
+    for seg in segments:
+        midpoint = seg["mid"]
+
+        # Find which clip contains this midpoint
+        target_clip = None
+        clip_offset = 0.0
+        for clip in clips:
+            clip_start = clip.get("start_time", 0)
+            clip_end = clip.get("end_time", 0)
+            if clip_start <= midpoint < clip_end:
+                target_clip = clip
+                clip_offset = midpoint - clip_start
+                break
+
+        if not target_clip:
+            continue
+
+        # Get clip file path
+        clip_path = os.path.join(UPLOAD_DIR, target_clip.get("filename", ""))
+        if not os.path.exists(clip_path):
+            storage_path = target_clip.get("storage_path", "")
+            if storage_path:
+                clip_path = await _download_clip_from_storage(storage_path, target_clip.get("filename", ""))
+
+        if clip_path and os.path.exists(clip_path):
+            frame = await _extract_single_frame(clip_path, clip_offset)
+            if frame:
+                frames.append(frame)
+
+    logger.info(f"[ANALYSIS] Extracted {len(frames)} per-shot frames")
+    return frames
+
+
 def compute_cut_density(clips: List[dict]) -> List[dict]:
     """
     Compute cuts per second in rolling 5-second windows (PRD Section 8.2).
@@ -886,7 +1023,8 @@ async def call_gpt4o_vision(
     clips: List[dict],
     gold_standard_style: str = None,
     auto_boundaries: List[float] = None,
-    video_structure: str = None
+    video_structure: str = None,
+    scene_changes: List[float] = None
 ) -> List[SectionAnalysis]:
     """
     Call GPT-4o Vision API (PRD Section 8.4).
@@ -904,11 +1042,12 @@ async def call_gpt4o_vision(
         gold_standard_style: Optional confirmed music style (used as default for all sections)
         auto_boundaries: Optional suggested section boundaries from pre-analysis
         video_structure: Detected video type (e.g., "Vlog", "Talking Head")
+        scene_changes: All detected cut timestamps (for scenic content analysis)
 
     Returns:
         List of SectionAnalysis parsed from GPT-4o response
     """
-    from config import OPENAI_API_KEY, OPENAI_BASE_URL
+    from config import OPENAI_API_KEY, OPENAI_BASE_URL, SCENIC_VIDEO_TYPES
 
     if not OPENAI_API_KEY:
         raise ValueError("OpenAI API key not configured")
@@ -946,16 +1085,35 @@ async def call_gpt4o_vision(
 
     # Include auto-boundaries as hints if available
     boundary_hint = ""
+    is_scenic = video_structure in SCENIC_VIDEO_TYPES
     if auto_boundaries and len(auto_boundaries) > 0:
         boundary_hint = f"\n\nSuggested section breaks (based on pacing changes): {auto_boundaries}. Consider these when dividing sections."
+
+    # For scenic content, include all cut timestamps so GPT-4o knows where shots change
+    scene_change_hint = ""
+    if is_scenic and scene_changes and len(scene_changes) > 0:
+        # Only include interior cuts (not start/end of video)
+        total_dur = max(c.get("end_time", 0) for c in clips) if clips else 0
+        interior_cuts = [round(c, 1) for c in scene_changes if 0.5 < c < (total_dur - 0.5)]
+        if interior_cuts:
+            scene_change_hint = f"\n\nShot change timestamps (visual cuts between different shots): {interior_cuts}. Each frame provided represents one distinct shot between these cuts."
 
     # Adjust section count based on video structure
     # Talking head / vlog content should have fewer sections (jump cuts don't count as scene changes)
     section_guidance = "Divide into 3-5 sections"
-    if video_structure in ("Talking Head", "Vlog", "Interview", "Tutorial"):
+    if video_structure in ("Talking Head", "Interview", "Tutorial"):
         section_guidance = "Divide into 2-3 sections (talking head content - only split at major topic changes, not jump cuts)"
     elif video_structure == "Montage":
         section_guidance = "Divide into 3-4 sections (montage - group similar pacing together)"
+    elif is_scenic:
+        section_guidance = (
+            "Divide into 3-5 sections based on LOCATION or SUBJECT changes. "
+            "Each provided frame represents a distinct shot. Group shots of the same place, setting, "
+            "or visual subject together into one section. Place section boundaries where the "
+            "location, setting, or visual subject changes significantly (e.g., mountains to beach, "
+            "city to countryside). Do NOT create a new section for every shot - only where the "
+            "topic/location truly changes"
+        )
 
     # Build compact prompt to save tokens
     system_prompt = f"""Score video for music. Brief: {brief.get('overall_energy', 'Medium')} energy, {brief.get('music_style_direction', 'background music')}.
@@ -963,19 +1121,20 @@ async def call_gpt4o_vision(
 TOTAL VIDEO DURATION: {total_duration:.1f} seconds. All section times MUST be within 0 to {total_duration:.1f}.
 Video type: {video_structure or 'Mixed'}
 Clip times: {clip_times}
-Pacing: {'; '.join(cut_density_summary[:5])}{boundary_hint}{style_instruction}
+Pacing: {'; '.join(cut_density_summary[:5])}{boundary_hint}{scene_change_hint}{style_instruction}
 
 Transcript excerpt: {transcript[:500] if transcript else "(none)"}
 
 {section_guidance}. Section times must be within 0 to {total_duration:.1f} seconds. Return JSON array only:
-[{{"start_time":float,"end_time":float,"section_type":"Hook|Intro|Setup|Build|Anticipation|Reveal|Reaction|Demonstration|Montage|Transition|Recap|Climax|Cooldown|Testimonial|CTA|Outro","scene_type":"Talking Head|Walk and Talk|Travel Montage|Product Showcase|Tutorial|Action Moment|Crowd/Event|Vlog/Casual|B-Roll|Interview","emotional_tone":"Energetic|Playful|Suspenseful|Inspirational|Dramatic|Calm|Informative|Nostalgic|Mysterious|Confident|Uplifting","pacing":"Very Slow|Slow|Medium|Fast|Very Fast","energy_level":"Very Low|Low|Medium Low|Medium|Medium High|High|Very High","detected_theme":"12 words max","dominant_visual":"8 words max","suggested_music_style":"20 words max"}}]"""
+[{{"start_time":float,"end_time":float,"section_type":"Hook|Intro|Setup|Build|Anticipation|Reveal|Reaction|Demonstration|Montage|Transition|Recap|Climax|Cooldown|Testimonial|CTA|Outro|Scenic","scene_type":"Talking Head|Walk and Talk|Travel Montage|Product Showcase|Tutorial|Action Moment|Crowd/Event|Vlog/Casual|B-Roll|Interview","emotional_tone":"Energetic|Playful|Suspenseful|Inspirational|Dramatic|Calm|Informative|Nostalgic|Mysterious|Confident|Uplifting","pacing":"Very Slow|Slow|Medium|Fast|Very Fast","energy_level":"Very Low|Low|Medium Low|Medium|Medium High|High|Very High","detected_theme":"12 words max","dominant_visual":"8 words max","suggested_music_style":"20 words max"}}]"""
 
     # Build messages with limited frames
     messages = [{"role": "system", "content": system_prompt}]
 
-    # Use maximum 8 frames to stay within token limits
+    # Use maximum 8 frames normally, 14 for scenic content (need to see each shot)
     frame_content = []
-    max_frames_for_analysis = min(8, len(frames))
+    frame_limit = 14 if is_scenic else 8
+    max_frames_for_analysis = min(frame_limit, len(frames))
     if len(frames) > max_frames_for_analysis:
         # Evenly sample frames
         step = len(frames) / max_frames_for_analysis
@@ -992,9 +1151,17 @@ Transcript excerpt: {transcript[:500] if transcript else "(none)"}
             }
         })
 
+    if is_scenic:
+        frame_text = (
+            f"Analyze {len(frames_to_send)} frames. Each frame is from a distinct shot (different camera angle or location). "
+            f"Group shots showing the same location/subject into one section. Return JSON array only."
+        )
+    else:
+        frame_text = f"Analyze {len(frames_to_send)} frames. Return JSON array only."
+
     frame_content.append({
         "type": "text",
-        "text": f"Analyze {len(frames_to_send)} frames. Return JSON array only."
+        "text": frame_text
     })
 
     messages.append({"role": "user", "content": frame_content})
@@ -1411,7 +1578,8 @@ async def pre_analyze_video(
         auto_boundaries = find_auto_boundaries(
             density_windows, total_duration,
             video_structure=video_structure,
-            transcript=clean_transcript
+            transcript=clean_transcript,
+            scene_changes=all_scene_changes
         )
         logger.info(f"[PRE-ANALYSIS] Auto-boundaries: {len(auto_boundaries)} suggested section breaks")
 
@@ -1534,9 +1702,11 @@ async def analyze_video_with_preanalysis(
             logger.info(f"[ANALYSIS] Gold standard music style: {gold_standard_style}")
 
         # Check if we should use transcript-based sectioning for talking head content
-        # This is ONLY for talking head / vlog with no significant pacing changes
+        # This is ONLY for true talking head / interview / tutorial with no significant pacing changes
+        # "Vlog" is excluded - it's too generic and may contain scenic or mixed content
+        # that benefits from GPT-4o visual analysis instead
         is_uniform_talking_head = (
-            video_structure in ("Talking Head", "Vlog", "Interview", "Tutorial")
+            video_structure in ("Talking Head", "Interview", "Tutorial")
             and (not auto_boundaries or len(auto_boundaries) == 0)
         )
 
@@ -1556,17 +1726,33 @@ async def analyze_video_with_preanalysis(
                 scene_changes=scene_changes
             )
         else:
-            # For non-talking-head content (montage, travel, etc.), use GPT-4o sectioning
-            logger.info("[ANALYSIS] Non-talking-head content - calling GPT-4o Vision for section analysis...")
+            # For non-talking-head content (montage, travel, scenic, etc.), use GPT-4o sectioning
+            from config import SCENIC_VIDEO_TYPES
+            is_scenic = video_structure in SCENIC_VIDEO_TYPES
+
+            # For scenic content: extract per-shot frames instead of using evenly-spaced ones
+            # This ensures GPT-4o sees a representative frame from each distinct shot
+            frames_for_gpt = all_frames
+            if is_scenic and scene_changes and len(scene_changes) >= 3:
+                logger.info("[ANALYSIS] Scenic content - extracting per-shot frames for better visual coverage...")
+                per_shot_frames = await _extract_per_shot_frames(clips, scene_changes)
+                if per_shot_frames and len(per_shot_frames) >= 3:
+                    frames_for_gpt = per_shot_frames
+                    logger.info(f"[ANALYSIS] Using {len(frames_for_gpt)} per-shot frames (replacing {len(all_frames)} evenly-spaced)")
+                else:
+                    logger.info("[ANALYSIS] Per-shot extraction returned too few frames, using evenly-spaced frames")
+
+            logger.info(f"[ANALYSIS] {'Scenic' if is_scenic else 'Non-talking-head'} content - calling GPT-4o Vision for section analysis...")
             sections = await call_gpt4o_vision(
-                frames=all_frames,
+                frames=frames_for_gpt,
                 transcript=merged_transcript,
                 cut_density=density_data,
                 brief=brief,
                 clips=clips,
                 gold_standard_style=gold_standard_style,
                 auto_boundaries=auto_boundaries,
-                video_structure=video_structure
+                video_structure=video_structure,
+                scene_changes=scene_changes if is_scenic else None
             )
 
         # Validate and align sections to clip boundaries
@@ -2053,7 +2239,8 @@ def find_auto_boundaries(
     windows: List[dict],
     total_duration: float,
     video_structure: str = None,
-    transcript: str = None
+    transcript: str = None,
+    scene_changes: List[float] = None
 ) -> List[float]:
     """
     Find section boundaries based on pacing changes AND content analysis.
@@ -2061,6 +2248,11 @@ def find_auto_boundaries(
     For talking head / vlog content, we're more conservative:
     - Jump cuts don't create new sections
     - Only significant pacing shifts matter (e.g., STATIC → MONTAGE)
+
+    For scenic / travel / cinematic content with uniform pacing:
+    - Pacing-based detection fails (all windows are SLOW/STATIC)
+    - Instead, suggest boundaries evenly distributed across detected cuts
+    - GPT-4o will refine these based on visual content similarity
 
     For montage / mixed content:
     - Pacing transitions create boundaries
@@ -2070,6 +2262,7 @@ def find_auto_boundaries(
         total_duration: Total video duration
         video_structure: Detected video type (e.g., "Vlog", "Talking Head")
         transcript: Clean transcript for topic detection
+        scene_changes: All detected cut timestamps (for scenic content boundary hints)
 
     Returns:
         List of boundary timestamps (excluding 0 and total_duration)
@@ -2077,7 +2270,8 @@ def find_auto_boundaries(
     from config import (
         MIN_SECTION_DURATION,
         MIN_VIDEO_DURATION_FOR_SPLIT,
-        MAX_AUTO_BOUNDARIES
+        MAX_AUTO_BOUNDARIES,
+        SCENIC_VIDEO_TYPES
     )
 
     # Skip very short videos
@@ -2088,8 +2282,9 @@ def find_auto_boundaries(
     if len(windows) < 2:
         return []
 
-    # Determine if this is talking head / vlog content
-    is_talking_head = video_structure in ("Talking Head", "Vlog", "Interview", "Tutorial")
+    # Determine if this is talking head content (not Vlog - too generic, may be scenic)
+    is_talking_head = video_structure in ("Talking Head", "Interview", "Tutorial")
+    is_scenic = video_structure in SCENIC_VIDEO_TYPES
 
     # Calculate dominant pacing
     dominant_categories = {}
@@ -2107,7 +2302,7 @@ def find_auto_boundaries(
         logger.info(f"[BOUNDARIES] Talking head content with uniform pacing ({dominant_percent:.0%} {dominant_pacing}), skipping auto-split")
         return []
 
-    # Find category transition points
+    # Find category transition points (pacing-based boundaries)
     raw_boundaries = []
 
     for i in range(1, len(windows)):
@@ -2124,6 +2319,26 @@ def find_auto_boundaries(
 
             raw_boundaries.append(curr["start"])
 
+    # For scenic content: if pacing-based detection found nothing,
+    # use cut-based boundary suggestions instead.
+    # Scenic videos have uniform pacing but visually distinct shots -
+    # we suggest boundaries by distributing evenly across cuts and snapping
+    # to the nearest actual cut point. GPT-4o will refine based on visual similarity.
+    if not raw_boundaries and is_scenic and scene_changes:
+        # Filter cuts that are within the video bounds (exclude 0 and total_duration)
+        interior_cuts = [c for c in scene_changes if MIN_SECTION_DURATION < c < (total_duration - MIN_SECTION_DURATION)]
+
+        if len(interior_cuts) >= 2:
+            # Aim for 3-5 sections depending on video length and number of cuts
+            target_sections = min(5, max(3, len(interior_cuts) // 3))
+            target_boundaries = target_sections - 1
+
+            # Distribute boundaries evenly across the timeline, snap to nearest cut
+            raw_boundaries = _distribute_boundaries_at_cuts(
+                interior_cuts, total_duration, target_boundaries
+            )
+            logger.info(f"[BOUNDARIES] Scenic content: suggested {len(raw_boundaries)} cut-based boundaries from {len(interior_cuts)} cuts")
+
     if not raw_boundaries:
         logger.info("[BOUNDARIES] No significant pacing changes detected")
         return []
@@ -2133,6 +2348,34 @@ def find_auto_boundaries(
 
     logger.info(f"[BOUNDARIES] Found {len(boundaries)} auto-boundaries from {len(raw_boundaries)} raw transitions (structure={video_structure})")
     return boundaries
+
+
+def _distribute_boundaries_at_cuts(
+    cuts: List[float],
+    total_duration: float,
+    target_count: int
+) -> List[float]:
+    """
+    Distribute boundary suggestions evenly across the timeline,
+    snapping each to the nearest actual cut point.
+
+    This provides reasonable default boundaries for scenic content
+    where pacing is uniform. GPT-4o will refine based on visual content.
+    """
+    if not cuts or target_count <= 0:
+        return []
+
+    boundaries = []
+    for i in range(1, target_count + 1):
+        # Target position: evenly divide the timeline
+        target_time = (i / (target_count + 1)) * total_duration
+
+        # Find nearest cut to this target
+        nearest_cut = min(cuts, key=lambda c: abs(c - target_time))
+        if nearest_cut not in boundaries:
+            boundaries.append(nearest_cut)
+
+    return sorted(boundaries)
 
 
 def is_significant_pacing_change(prev_category: str, curr_category: str) -> bool:
@@ -2270,28 +2513,50 @@ def detect_video_structure_fast(
     Returns:
         dict with video_structure, theme_summary
     """
-    from config import VIDEO_STRUCTURE_TYPES
+    from config import VIDEO_STRUCTURE_TYPES, DENSITY_WINDOW_SIZE
 
     # Clean transcript of timestamps before analysis
     clean_transcript = clean_transcript_timestamps(transcript)
     transcript_lower = (clean_transcript or "").lower()
 
-    # Calculate dominant pacing
+    # Calculate dominant pacing and shot pattern metrics
+    dominant_pacing = "MEDIUM"
+    total_cuts = 0
+    total_video_duration = 0.0
+
     if density_windows:
         dominant_categories = {}
         for w in density_windows:
             cat = w["category"]
             dominant_categories[cat] = dominant_categories.get(cat, 0) + 1
+            total_cuts += w.get("cuts_count", 0)
         dominant_pacing = max(dominant_categories, key=dominant_categories.get)
-    else:
-        dominant_pacing = "MEDIUM"
+        total_video_duration = density_windows[-1].get("end", 0) if density_windows else 0
 
-    # Heuristic detection based on keywords and pacing
+    # Average shot duration: total_duration / (total_cuts + 1)
+    # Many short shots (avg < 5s) = scenic or montage, NOT talking head
+    avg_shot_duration = total_video_duration / (total_cuts + 1) if total_cuts > 0 else total_video_duration
+    has_many_short_shots = total_cuts >= 5 and avg_shot_duration < 5.0
+
+    # Transcript density: chars per second of video
+    transcript_chars = len(transcript_lower.strip())
+    transcript_density = transcript_chars / total_video_duration if total_video_duration > 0 else 0
+
+    logger.debug(f"[STRUCTURE] Metrics: cuts={total_cuts}, avg_shot={avg_shot_duration:.1f}s, "
+                 f"transcript={transcript_chars} chars ({transcript_density:.1f} chars/s), pacing={dominant_pacing}")
+
+    # Heuristic detection based on keywords, pacing, and shot patterns
     video_structure = "Vlog"  # Default
     theme_summary = None  # Will be set based on detection
 
+    # FIRST: Check shot patterns - many short shots at non-montage pacing = Scenic
+    # This is the strongest signal and takes priority over keyword detection
+    # because scenic videos may have light narration mentioning travel, etc.
+    if has_many_short_shots and dominant_pacing in ("SLOW", "MEDIUM", "STATIC"):
+        video_structure = "Scenic"
+        theme_summary = "Scenic or visual content"
     # Check for specific keywords
-    if any(word in transcript_lower for word in ["tutorial", "how to", "step by step", "let me show you"]):
+    elif any(word in transcript_lower for word in ["tutorial", "how to", "step by step", "let me show you"]):
         video_structure = "Tutorial"
         theme_summary = "Tutorial or how-to guide"
     elif any(word in transcript_lower for word in ["interview", "tell me about", "what do you think"]):
@@ -2318,9 +2583,15 @@ def detect_video_structure_fast(
     elif dominant_pacing == "MONTAGE":
         video_structure = "Montage"
         theme_summary = "Fast-paced montage"
-    elif dominant_pacing == "STATIC":
-        video_structure = "Talking Head"
-        theme_summary = "Talking head or presentation"
+    elif dominant_pacing in ("SLOW", "STATIC"):
+        # Slow/static pacing without many short shots
+        # Low transcript density = scenic, high transcript density = talking head
+        if transcript_density < 15:
+            video_structure = "Scenic"
+            theme_summary = "Scenic or visual content"
+        elif dominant_pacing == "STATIC":
+            video_structure = "Talking Head"
+            theme_summary = "Talking head or presentation"
 
     # If no specific theme detected, create a summary from clean transcript
     if theme_summary is None and clean_transcript and len(clean_transcript) > 20:
@@ -2384,6 +2655,7 @@ def suggest_music_style(vibe: str, video_structure: str, theme_summary: str = No
         "Montage": 0,
         "Short Form": 0,
         "Cinematic": 2,  # Usually orchestral
+        "Scenic": 2,  # Usually ambient/orchestral
         "Talking Head": 1,
         "Mixed": 0
     }

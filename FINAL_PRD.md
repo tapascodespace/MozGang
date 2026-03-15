@@ -1,5 +1,5 @@
-# ScoreFlow — PRD v4.1
-**Status:** Final for Vibe Coding | **Date:** 14 March 2026 | **Scope:** 24-hour hackathon MVP | **Platform:** Desktop web only
+# ScoreFlow — PRD v4.2
+**Status:** Phase 2 Complete | **Date:** 15 March 2026 | **Scope:** 24-hour hackathon MVP | **Platform:** Desktop web only
 
 ---
 
@@ -75,7 +75,21 @@ create table projects (
   overall_energy text,
   music_style_direction text,
   references_text text,
-  analysis_mode text default 'AI'  -- 'AI' | 'FALLBACK'
+  analysis_mode text default 'AI',  -- 'AI' | 'FALLBACK'
+  -- Pre-analysis (Phase 2)
+  pre_analysis_status text default 'PENDING',
+  pre_analysis_frames jsonb,
+  pre_analysis_transcript text,
+  pre_analysis_cut_density jsonb,
+  pre_analysis_scene_changes jsonb,
+  pre_analysis_auto_boundaries jsonb,
+  -- Video structure detection
+  detected_video_structure text,
+  detected_theme_summary text,
+  -- Vibe / style flow
+  selected_vibe text,
+  recommended_music_style text,
+  confirmed_music_style text
 );
 
 create table clips (
@@ -107,6 +121,7 @@ create table sections (
   dominant_visual text,
   suggested_music_style text,
   music_status text default 'PENDING',  -- PENDING | GENERATING | READY | FAILED
+  analysis_status text default 'COMPLETE',  -- PENDING | ANALYZING | COMPLETE | FAILED
   feedback_history jsonb default '[]',
   section_order int
 );
@@ -130,7 +145,7 @@ create table tracks (
 ```python
 SECTION_TYPES  = ["Hook","Intro","Setup","Build","Anticipation","Reveal",
                   "Reaction","Demonstration","Montage","Transition","Recap",
-                  "Climax","Cooldown","Testimonial","CTA","Outro"]
+                  "Climax","Cooldown","Testimonial","CTA","Outro","Scenic"]
 
 SCENE_TYPES    = ["Talking Head","Walk and Talk","Travel Montage","Product Showcase",
                   "Tutorial","Action Moment","Crowd/Event","Reaction Shot",
@@ -184,15 +199,22 @@ Full-screen drop zone. Header = `PRODUCT_NAME`. Accept MP4/MOV/WebM. On drop →
 
 "Paste YouTube/TikTok URL" field is disabled with tooltip "Coming soon."
 
-### 6.3 Creative Brief Modal
+### 6.3 Simplified Onboarding (Vibe → AI Recommendation)
 
-Shown after upload. Questions 1 and 2 are required.
+Replaces the original 3-question Creative Brief with a streamlined 2-step flow:
 
-1. "What energy should the video have overall?" → `overall_energy` (required)
-2. "What music style do you want?" → `music_style_direction` (required)
-3. "Any references or inspiration?" → `references_text` (optional)
+**Step 1 — Vibe Selector:** Single question: "What vibe should your video have?"
+- Options: Energetic, Chill, Dramatic, Playful, Inspirational, Mysterious, Romantic, Epic, Nostalgic, Confident
+- Component: `frontend/src/components/VibeSelector.jsx`
+
+**Step 2 — AI Recommendation:** Shows detected video type + recommended music style.
+- User can edit the recommendation before confirming
+- Confirmed style becomes the "gold standard" for all sections
+- Component: `frontend/src/components/AIRecommendation.jsx`
 
 Submit: **"Score My Video →"** triggers the analysis pipeline.
+
+**Legacy Creative Brief** is still supported via the API (`POST /api/projects/{id}/brief`) for direct `overall_energy`, `music_style_direction`, and `references_text` input.
 
 ### 6.4 Workspace Layout
 
@@ -221,6 +243,7 @@ Submit: **"Score My Video →"** triggers the analysis pipeline.
 Hook=#FF6B6B  Intro=#4A90D9   Setup=#8B9DC3   Build=#F5A623
 Reveal=#D0021B Reaction=#FF85A2 Demonstration=#50C878 Montage=#9B59B6
 Recap=#3498DB  Climax=#C0392B  Cooldown=#1ABC9C CTA=#E74C3C  Outro=#9013FE
+Scenic=#2ECC71
 ```
 
 **Music layer:** one block per section, same width as section.
@@ -237,9 +260,17 @@ Each section block has a **"Generate ▶"** button.
 
 ### 6.6 Preview Player
 
-Preview uses **client-side audio sync** for generated tracks.
+Preview uses **dual video element preloading** for seamless clip transitions and **client-side audio sync** for generated tracks.
 
-The frontend plays video clips directly via `<video>` element and syncs generated music via a separate `<audio>` element:
+**Video Playback — Dual Element Architecture:**
+- Two `<video>` elements (A and B) stacked via `position: absolute`
+- While clip N plays on element A, clip N+1 preloads on element B
+- On clip transition, swap visibility and play the pre-buffered element (near-instant)
+- Falls back to src-switch for non-preloaded clips (e.g., seek jumps)
+- All event handlers (`timeupdate`, `ended`, `seeked`) check `e.target` against the active element to ignore preload events
+
+**Audio Sync:**
+- Separate `<audio>` element synced with video playback
 - Finds the current section based on playhead time
 - Looks up the non-discarded track for that section
 - Plays track audio with correct offset within section
@@ -272,13 +303,16 @@ Sections without a READY track play video with no music — this is expected, no
 
 ### 6.9 Progress Indicator
 
-Modal overlay, 4 steps via Supabase Realtime:
-1. "Uploading clips..."
-2. "Extracting frames..." (parallel with 3)
-3. "Transcribing audio..." (parallel with 2)
-4. "Analysing video structure..."
+**Pre-analysis (runs immediately after upload, before vibe selection):**
+- Frame extraction, audio transcription, scene change detection, cut density computation
+- Triggered by `POST /api/projects/{id}/pre-analyze` (fire-and-forget from ImportScreen)
+- Results cached in `projects` table columns (`pre_analysis_*`)
 
-If step 4 fails or times out → fallback (§8.3).
+**Analysis (runs after vibe + style confirmed):**
+- Only GPT-4o Vision call needed (uses cached pre-analysis data)
+- Modal overlay via Supabase Realtime: "Analysing video structure..."
+
+If GPT-4o fails or times out → fallback (§8.5).
 
 **Fallback notice:** show banner in workspace: `"Automatic segmentation used — AI analysis unavailable."`
 
@@ -306,6 +340,11 @@ POST   /api/projects/{id}/sections/{sid}/undo       Restore most recent discarde
 GET    /api/projects/{id}/clips/{cid}/stream        Stream clip for preview
 GET    /api/projects/{id}/tracks                    Get all non-discarded tracks
 GET    /api/projects/{id}/tracks/{tid}/download     Download individual track
+POST   /api/projects/{id}/pre-analyze                 Start pre-analysis (fire-and-forget)
+GET    /api/projects/{id}/pre-analysis-status        Get pre-analysis status + results
+POST   /api/projects/{id}/vibe                       Set vibe, get music style recommendation
+POST   /api/projects/{id}/confirm-style              Confirm gold standard music style
+POST   /api/projects/{id}/sections/{sid}/reanalyze   Re-analyze section with AI (after merge/split)
 POST   /api/projects/{id}/export                    Full export
 GET    /api/projects/{id}/export/download           Download MP4
 ```
@@ -364,9 +403,35 @@ ffmpeg -i clip.mp4 -vf "fps=0.4,scale=128:72" -q:v 10 thumbnails/clip_N_%04d.jpg
 ```
 Upload to Supabase Storage. Return URLs as `thumbnail_urls`.
 
-### 8.2 Cut Density Computation
+### 8.2 Scene Detection & Cut Density
 
-From clip metadata only (no FFmpeg). Rolling 5-second windows. Output: `[{window_start, window_end, cuts_per_second}]`.
+**Scene Change Detection (FFmpeg):**
+```bash
+ffmpeg -i clip.mp4 -filter:v "select='gt(scene,0.3)',showinfo" -f null -
+```
+Detects visual scene changes within clips. Combined with clip boundaries to produce a full cut timeline.
+
+**Cut Density Computation:**
+Rolling 5-second windows over the combined cut timeline. Each window categorized:
+- `MONTAGE`: >1.5 cuts/sec — fast-paced, many cuts
+- `MEDIUM`: 0.5–1.5 cuts/sec — active but not frantic
+- `SLOW`: 0.1–0.5 cuts/sec — few cuts, deliberate pacing
+- `STATIC`: <0.1 cuts/sec — continuous shot
+
+Output: `[{window_start, window_end, cuts_per_second, category}]`.
+
+**Auto Boundary Detection:**
+Section boundaries are placed where pacing CHANGES (e.g., MONTAGE→SLOW transition). Guardrails: min 10s sections, max 4 boundaries (5 sections), skip videos <30s.
+
+For scenic videos with uniform pacing (no transitions detected), boundaries are distributed evenly across the timeline, snapped to the nearest actual cut point.
+
+**Video Structure Detection:**
+Three-signal classification (strongest first):
+1. **Shot patterns**: ≥5 cuts + avg shot duration <5s + SLOW/MEDIUM/STATIC pacing → "Scenic"
+2. **Transcript density**: Low chars/sec (<15) at SLOW/STATIC pacing → "Scenic"
+3. **Pacing fallback**: Montage-dominant → "Montage", talking-head keywords → "Talking Head", etc.
+
+Types: Vlog, Tutorial, Interview, Travel, Product Review, Gaming, Music Video, Documentary, Podcast, Event, Fitness, Cooking, News, Presentation, Behind the Scenes, Montage, Short Form, Cinematic, Talking Head, Scenic, Mixed
 
 ### 8.3 Audio Transcription (ElevenLabs STT)
 
@@ -387,7 +452,7 @@ POST https://api.openai.com/v1/chat/completions
 model: gpt-4o
 ```
 
-**Prompt:**
+**Standard Prompt:**
 ```
 You are scoring a video for background music composition.
 
@@ -416,6 +481,20 @@ Return ONLY a raw JSON array. No markdown, no explanation.
   "suggested_music_style": "max 30 words, must use creator's style direction"
 }]
 ```
+
+**Scenic Video Enhancements:**
+
+For scenic content (detected structure in `SCENIC_VIDEO_TYPES`):
+
+1. **Per-shot frame extraction**: Instead of evenly-spaced frames, one frame is extracted from the midpoint of each shot segment (between consecutive cuts). This gives GPT-4o visual coverage of every distinct shot rather than missing short shots.
+
+2. **Increased frame limit**: Up to 14 frames (vs 8 standard) since scenic videos have many short visually-diverse shots.
+
+3. **Scenic-specific prompt additions**:
+   - All scene change timestamps included so GPT-4o knows exact cut points
+   - Guidance to group visually similar shots (same location/subject) into sections
+   - Use "Scenic" section_type for landscape/environment/nature shots
+   - Each frame labeled as coming from a distinct shot segment
 
 ### 8.5 Fallback (GPT-4o fails or >35s)
 
@@ -576,22 +655,25 @@ Build the full UI with mocked AI. Everything must look and feel real.
 | # | Risk | Mitigation |
 |---|---|---|
 | 1 | ElevenLabs `duration_seconds` unreliable | Always trim output with FFmpeg regardless |
-| 2 | GPT-4o 120-frame context limit | Evenly subsample to cap |
+| 2 | GPT-4o 120-frame context limit | Evenly subsample to cap; per-shot extraction for scenic |
 | 3 | Preview MP4 rebuild latency on every track change | Debounce 2s; show "Rebuilding preview..." |
 | 4 | Supabase CDN latency for track playback | Pre-fetch stream URL when section hits READY |
 | 5 | Large dropdowns (30 emotional tones) | Group by energy level, add search |
+| 6 | Scenic videos misclassified as talking head | Shot pattern detection: many short shots + low transcript → Scenic |
+| 7 | Clip transition stutter (500ms delay) | Dual video element preloading with A/B swap |
+| 8 | Uniform-pacing scenic videos get 0 boundaries | Distribute boundaries evenly at cut points for scenic content |
 
 ---
 
 ## 14. Demo Script (90 seconds)
 
 1. Drop 60–90s clips onto import screen
-2. Creative Brief modal → type energy and style
-3. "Score My Video →" → progress overlay
-4. Workspace: 3–5 labelled sections on timeline
+2. Select a vibe (e.g., "Cinematic", "Energetic")
+3. AI recommends music style → confirm or tweak → "Score My Video →"
+4. Workspace: 3–5 AI-detected sections on timeline (scenic, montage, etc.)
 5. Click section → panel shows theme, tone, style
 6. Click "Generate ▶" → amber pulse → track appears
-7. Play → preview MP4 with music streams
+7. Play → seamless clip transitions with synced music
 8. Type feedback → Regenerate → new track
 9. Export → browser downloads MP4
 
