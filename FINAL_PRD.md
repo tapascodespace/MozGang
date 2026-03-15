@@ -13,7 +13,7 @@ Drop your video clips. The AI reads the story. The music writes itself — per s
 | Decision | Answer |
 |---|---|
 | Backend | Python + FastAPI |
-| Frontend | React (desktop web only) |
+| Frontend | React 18 + TypeScript + Vite + Tailwind + Radix UI (desktop web only) |
 | Database | Supabase (Postgres + Storage) |
 | Music generation | ElevenLabs `/v1/sound-generation` |
 | Transcription | ElevenLabs `/v1/speech-to-text` |
@@ -205,12 +205,12 @@ Replaces the original 3-question Creative Brief with a streamlined 2-step flow:
 
 **Step 1 — Vibe Selector:** Single question: "What vibe should your video have?"
 - Options: Energetic, Chill, Dramatic, Playful, Inspirational, Mysterious, Romantic, Epic, Nostalgic, Confident
-- Component: `frontend/src/components/VibeSelector.jsx`
+- Component: `frontend_new/src/components/intake/VibeSelector.tsx`
 
 **Step 2 — AI Recommendation:** Shows detected video type + recommended music style.
 - User can edit the recommendation before confirming
 - Confirmed style becomes the "gold standard" for all sections
-- Component: `frontend/src/components/AIRecommendation.jsx`
+- Component: `frontend_new/src/components/intake/AIRecommendation.tsx`
 
 Submit: **"Score My Video →"** triggers the analysis pipeline.
 
@@ -219,20 +219,22 @@ Submit: **"Score My Video →"** triggers the analysis pipeline.
 ### 6.4 Workspace Layout
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ TOP BAR: [ScoreFlow]    [How It Works]    [Export]       │
-├───────────────────────────────┬─────────────────────────┤
-│ PREVIEW PLAYER (<video>)      │ SECTION PANEL           │
-│ play/pause, scrub, time       │ (right sidebar)         │
-│ Plays server preview MP4      │ visible when section    │
-├───────────────────────────────┤ is selected             │
-│ TIMELINE                      │                         │
-│  VIDEO    [thumbnail strips]  │                         │
-│  SECTIONS [colour blocks]     │                         │
-│  MUSIC    [track blocks]      │                         │
-│  [+ Add Clips]   [Zoom +/-]   │                         │
-└───────────────────────────────┴─────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ TOP BAR: [ScoreFlow]  [◀ ▶ ⏯]  [How It Works]  [Export]          │
+├──────┬───────────────────────────────┬──────────────────────────┤
+│MEDIA │ PREVIEW PLAYER (dual <video>) │ SECTION PANEL            │
+│BROWSE│ play/pause, scrub, time       │ (right sidebar)          │
+│(left)│ Client-side clip + audio sync │ visible when section     │
+│      ├───────────────────────────────┤ is selected              │
+│Staged│ TIMELINE                      │                          │
+│clips │  VIDEO    [filmstrip thumbs]  │ Dropdowns, generate,     │
+│  +   │  SECTIONS [colour blocks]     │ regenerate, "Try:" tips  │
+│Uplded│  MUSIC    [track blocks]      │ Volume controls          │
+│clips │  [Zoom +/-]                   │                          │
+└──────┴───────────────────────────────┴──────────────────────────┘
 ```
+
+**Media Browser (left sidebar):** Shows staged files (not yet uploaded, dashed border, "Drag to timeline" badge) and uploaded clips (solid border). Both are draggable — drop onto section boundary drop zones on the timeline to add/duplicate clips.
 
 ### 6.5 Timeline Layers
 
@@ -260,7 +262,7 @@ Each section block has a **"Generate ▶"** button.
 
 ### 6.6 Preview Player
 
-Preview uses **dual video element preloading** for seamless clip transitions and **client-side audio sync** for generated tracks.
+Preview uses **dual video element preloading** for seamless clip transitions and **client-side audio sync** for generated tracks. Implemented in `frontend_new/src/hooks/useVideoPlayer.ts` (hook) and `frontend_new/src/components/editor/VideoPreview.tsx` (UI).
 
 **Video Playback — Dual Element Architecture:**
 - Two `<video>` elements (A and B) stacked via `position: absolute`
@@ -554,6 +556,8 @@ def build_music_prompt(section, brief, prev_section=None, next_section=None):
 
 Neighbor sections (`prev_section`, `next_section`) are fetched from the database by `section_order`. This ensures each generated track transitions smoothly into and out of its neighbors. Applies to both initial generation and regeneration with feedback.
 
+**Prompt length limit:** ElevenLabs Sound Generation API has a **450 character limit**. `build_music_prompt()` truncates the assembled prompt to 450 chars. Keep individual parts concise to avoid losing transition context.
+
 **Long sections:** if `section.duration > 30`, split into ≤30s chunks, generate sequentially with the same prompt, concatenate with FFmpeg.
 
 **After generation, always trim with FFmpeg to exactly `section.duration`:**
@@ -643,6 +647,37 @@ Then:
 
 ---
 
+## 10.5 Two-Step Media Staging & Clip Duplication
+
+### Adding Clips in Workspace
+
+Users can add more clips after entering the workspace without leaving the editing flow:
+
+**Step 1 — Stage:** Drop video files from the desktop onto the Media Browser (left sidebar). Files are staged locally as `File` + `objectURL` — no upload occurs yet. Staged clips display with a dashed border and a "Drag to timeline" badge.
+
+**Step 2 — Place:** Drag a staged clip onto a drop zone between sections on the timeline. This triggers:
+1. Upload to Supabase Storage
+2. Reorder clips to insert at the correct timeline position
+3. Full page reload for clean player/timeline state
+
+### Clip Duplication
+
+Existing clips (already uploaded and in the timeline) can also be dragged from the Media Browser gallery onto timeline drop zones. This creates a duplicate:
+1. Fetches the original clip's video blob from Supabase Storage
+2. Re-uploads as a new clip (fresh UUID — no ID collision)
+3. Reorders to the correct position
+4. Full page reload
+
+### Insertion Position Logic
+
+When a clip is dropped at a section boundary, the insert position is computed by accumulating clip durations until the cumulative time meets or exceeds the drop zone's timeline position. The check happens BEFORE adding each clip's duration to ensure `insertAtTime=0` correctly inserts at the beginning.
+
+### Auto-Regeneration After Clip Addition
+
+After page reload, the backend's existing section/clip relationship logic handles reanalysis. Sections that span new clips will be reanalyzed and music regenerated automatically via the standard `useProjectState` polling chains.
+
+---
+
 ## 11. Phase 1 — Workspace Shell (Build First)
 
 Build the full UI with mocked AI. Everything must look and feel real.
@@ -667,7 +702,7 @@ Build the full UI with mocked AI. Everything must look and feel real.
 
 | Feature | Reason |
 |---|---|
-| Clip reorder | Cut — simplifies editing model |
+| Clip reorder (drag within timeline) | Cut — simplifies editing model. Clips can be duplicated by dragging from gallery. |
 | Section resize | Cut — merge/split is sufficient |
 | Undo / discard track restore | Cut — complexity not worth it for MVP |
 | Beat-level sync | Too complex for 24h |
@@ -692,6 +727,9 @@ Build the full UI with mocked AI. Everything must look and feel real.
 | 6 | Scenic videos misclassified as talking head | Shot pattern detection: many short shots + low transcript → Scenic |
 | 7 | Clip transition stutter (500ms delay) | Dual video element preloading with A/B swap |
 | 8 | Uniform-pacing scenic videos get 0 boundaries | Distribute boundaries evenly at cut points for scenic content |
+| 9 | ElevenLabs 450 char prompt limit | `build_music_prompt()` truncates to 450 chars |
+| 10 | Player state corruption after clip add | Full `window.location.reload()` after upload + reorder (MVP) |
+| 11 | `handleTimeUpdate` using stale clip index | Use `currentClipIndexRef.current` (sync ref), not `currentClipIndex` (async state) |
 
 ---
 

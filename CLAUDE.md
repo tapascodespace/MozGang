@@ -7,7 +7,8 @@ ScoreFlow is an AI-powered tool that analyzes video clips and generates section-
 
 ## Tech Stack
 - **Backend**: Python 3.11+ / FastAPI (in `/backend/`)
-- **Frontend**: React 18 + Vite (in `/frontend/`)
+- **Frontend (active)**: React 18 + TypeScript + Vite + Tailwind + Radix UI (in `/frontend_new/`, port 8080)
+- **Frontend (legacy)**: React 18 + Vite JSX (in `/frontend/`, port 5173) — still works but not actively developed
 - **Database**: Supabase (Postgres + Storage + Realtime)
 - **AI Services**: ElevenLabs (music gen + STT), OpenAI GPT-4o Vision
 - **Processing**: FFmpeg (server-side)
@@ -27,15 +28,26 @@ ScoreFlow is an AI-powered tool that analyzes video clips and generates section-
     analysis_service.py - Video analysis (GPT-4o Vision)
     music_service.py    - Music generation (ElevenLabs)
 
-/frontend/
+/frontend_new/           ← ACTIVE FRONTEND (always edit this one)
   src/
-    components/    - React components
+    components/editor/   - Workspace components (Timeline, MediaBrowser, SectionPanel, etc.)
+    components/intake/   - Upload + onboarding components
+    components/ui/       - Radix UI primitives (shadcn/ui)
+    hooks/               - useProjectState, useVideoPlayer, useClipUpload
+    services/            - API client (api.ts), Supabase client (supabase.ts)
+    pages/               - IntakePage, WorkspacePage
+    types/               - TypeScript types + enum constants
+    index.css            - Global styles, CSS variables, design tokens
+
+/frontend/               ← LEGACY (do not edit unless specifically asked)
+  src/
+    components/    - React JSX components
     hooks/         - Custom hooks
     services/      - API client, Supabase client
-    stores/        - State management
-    styles/        - Global styles, design tokens
     App.jsx        - Main app component
 ```
+
+**IMPORTANT**: Always edit `/frontend_new/`, never `/frontend/` unless explicitly asked.
 
 ## Key Conventions
 - Product name from `PRODUCT_NAME` config - never hardcode "ScoreFlow"
@@ -57,10 +69,13 @@ SUPABASE_ANON_KEY=...
 # Backend
 cd backend && pip install -r requirements.txt && uvicorn main:app --reload --port 8000
 
-# Frontend
-cd frontend && npm install && npm run dev
+# Frontend (active — TypeScript)
+cd frontend_new && npm install && npm run dev   # port 8080
 npm run lint     # ESLint
 npm run build    # Production build
+
+# Frontend (legacy — JSX, do not use unless asked)
+cd frontend && npm install && npm run dev       # port 5173
 ```
 
 ## Database Setup
@@ -217,12 +232,19 @@ GET    /projects/{id}/export/download      Download MP4
 
 ## Workspace Enhancement Features
 
-### Feature 1: Add Videos in Workspace
-Users can add more clips after entering the workspace:
-- "+ Add Clips" button in the Timeline zoom bar
-- Opens AddClipsModal with dropzone
-- New clips append to timeline, last section extends automatically
-- Component: `frontend/src/components/AddClipsModal.jsx`
+### Feature 1: Two-Step Media Staging & Clip Addition
+Users can add more clips after entering the workspace via a two-step drag-and-drop workflow:
+
+**Step 1 — Stage:** Drop video files onto the MediaBrowser sidebar (left panel). Files are staged locally (File + objectURL) — no upload yet. Staged clips show with a dashed border and "Drag to timeline" badge.
+
+**Step 2 — Place:** Drag a staged clip (or an existing clip from the gallery) onto a drop zone between sections on the timeline. This triggers upload to Supabase, reorder to the correct position, and a full page reload for clean state.
+
+- Component: `frontend_new/src/components/editor/MediaBrowser.tsx`
+- Drop zones: `SectionDropZone` in `frontend_new/src/components/editor/Timeline.tsx`
+- Handlers: `handleStagedFileDrop` and `handleClipReAdd` in `frontend_new/src/pages/WorkspacePage.tsx`
+- Existing clips can be duplicated by dragging from the gallery to a timeline drop zone (re-uploads as new clip with fresh UUID)
+- After clip addition, `window.location.reload()` ensures clean player/timeline state (MVP approach)
+- Insertion position computed by cumulative time: clips insert at the section boundary matching the drop zone position
 
 ### Feature 2: Pre-Analysis Before Brief
 Frame extraction, transcription, and cut density run immediately after upload:
@@ -350,7 +372,7 @@ Run `migrations/002_auto_section_detection.sql` to add new columns.
 When playing through the timeline, transitioning between uploaded clips caused a ~500ms stutter because a single `<video>` element was switching `src` (requiring network fetch + decoder init).
 
 ### Solution: Dual Video Element Preloading
-Component: `frontend/src/components/PreviewPlayer.jsx`
+Component: `frontend_new/src/hooks/useVideoPlayer.ts` (hook) + `frontend_new/src/components/editor/VideoPreview.tsx` (UI)
 
 **Architecture:**
 - Two `<video>` elements (A and B) stacked on top of each other via `position: absolute`
@@ -366,6 +388,7 @@ Component: `frontend/src/components/PreviewPlayer.jsx`
 - Event handlers (`handleTimeUpdate`, `handleEnded`) check `e.target` against active element to ignore events from the preload element
 - `handleLoadedMetadata` correctly stores clip duration for both active and preloaded clips
 - Falls back to src-switch on seeks to non-preloaded clips (rare)
+- **Important:** `handleTimeUpdate` must use `currentClipIndexRef.current` (sync ref), NOT `currentClipIndex` (async React state) — state hasn't flushed after slot swap, causing 100ms glitch at clip transitions
 
 ---
 
@@ -390,8 +413,40 @@ When the brief is submitted (`POST /projects/{id}/brief`), music generation auto
 - Frontend sees status updates via Supabase Realtime — tracks appear one-by-one
 - No manual "Generate" click needed; users can still regenerate individual sections with feedback
 
+### Music Prompt Truncation
+ElevenLabs Sound Generation API has a **450 character limit** on prompts. `build_music_prompt()` truncates to 450 chars after assembly. Keep individual prompt parts concise.
+
+### Auto-Regeneration Chains
+The frontend automatically triggers reanalysis + music regeneration after structural changes:
+- **Merge** → reanalyze merged section → generate music
+- **Split** → reanalyze both new sections → generate music for each
+- **Brief update** → regenerate all sections with `READY` or `FAILED` status
+- **Clip addition** → page reload (reanalyze + generate handled by backend on next load)
+- **Section attribute change** (type, tone, pacing, energy) → auto-regenerate that section's music
+
+Implementation: `useProjectState.ts` hooks chain polling (`pollForAnalysis` → `pollForMusic`) to wait for async backend operations.
+
 ### Implementation Files
 - `backend/services/analysis_types.py`: `build_music_prompt()` accepts `prev_section`/`next_section`
 - `backend/services/music_service.py`: `generate_music_for_section()` passes neighbor context through
 - `backend/routes/sections.py`: `_get_neighbor_sections()` fetches adjacent sections by `section_order`; generate/regenerate endpoints pass neighbors
 - `backend/routes/projects.py`: `_background_generate_all_sections()` auto-generates all sections after brief
+
+---
+
+## Frontend Workspace Components (`frontend_new/`)
+
+### Key Components
+- **WorkspacePage** (`pages/WorkspacePage.tsx`): Main workspace orchestrator. Manages staged files state, volume controls, drop handlers.
+- **MediaBrowser** (`components/editor/MediaBrowser.tsx`): Left sidebar. Displays uploaded clips + staged files. Drag source for timeline drops.
+- **VideoPreview** (`components/editor/VideoPreview.tsx`): Dual video elements + audio element for seamless playback.
+- **Timeline** (`components/editor/Timeline.tsx`): Video thumbnails, section blocks, music track blocks, playhead, zoom. Section drop zones between sections accept staged files and existing clips.
+- **SectionPanel** (`components/editor/SectionPanel.tsx`): Right sidebar. Section details, dropdowns, generate/regenerate, volume controls, "Try:" contextual suggestions.
+- **TopBar** (`components/editor/TopBar.tsx`): Project name, play/pause/skip, export, brief editing.
+
+### Key Hooks
+- **useProjectState** (`hooks/useProjectState.ts`): All project data loading, Supabase Realtime subscriptions, mutation handlers (merge, split, generate, reanalyze), polling helpers.
+- **useVideoPlayer** (`hooks/useVideoPlayer.ts`): Dual video element management, clip-to-timeline time mapping, preloading, seek, play/pause.
+
+### Timeline "Try:" Suggestions
+The SectionPanel and Timeline popup show contextual "Try:" suggestions for music regeneration. The suggested style is based on the current `suggested_music_style` — e.g., if current style is "Upbeat pop", suggestion might be "Calm pop". Falls back to `Calm ${currentStyle}` if no specific mapping exists.
