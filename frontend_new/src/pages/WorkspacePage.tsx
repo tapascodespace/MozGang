@@ -36,7 +36,6 @@ export default function WorkspacePage() {
     handleMergeSections,
     handleSplitAtCursor,
     handleReanalyzeSection,
-    handleAddClipsComplete,
     handleExport,
   } = useProjectState(projectId);
 
@@ -56,7 +55,6 @@ export default function WorkspacePage() {
     handleSeeked,
     handleVideoError,
     videoError,
-    resetPlayer,
   } = useVideoPlayer({ clips, sections, tracks });
 
   // Sync volume to video/audio elements
@@ -82,19 +80,41 @@ export default function WorkspacePage() {
     setStagedFiles((prev) => [...prev, ...newFiles]);
   }, []);
 
+  /** Helper: compute insert position from time and reorder clips */
+  const reorderNewClip = async (projectId: string, newClipId: string, insertAtTime: number) => {
+    const currentClips = await api.getClips(projectId);
+    const ordered = [...(currentClips.data || [])].sort(
+      (a: Clip, b: Clip) => a.clip_order - b.clip_order
+    );
+    const withoutNew = ordered.filter((c: Clip) => c.id !== newClipId);
+    const newClip = ordered.find((c: Clip) => c.id === newClipId);
+    if (!newClip) return;
+
+    // Find insert position: check cumTime BEFORE adding each clip's duration
+    let insertIdx = withoutNew.length;
+    let cumTime = 0;
+    for (let i = 0; i < withoutNew.length; i++) {
+      if (cumTime >= insertAtTime) {
+        insertIdx = i;
+        break;
+      }
+      cumTime += withoutNew[i].duration;
+    }
+
+    withoutNew.splice(insertIdx, 0, newClip);
+    await api.reorderClips(projectId, withoutNew.map((c: Clip) => c.id));
+  };
+
   /** When a staged file is dropped onto the timeline between sections */
   const handleStagedFileDrop = useCallback(
     async (stagedIndex: number, insertAtTime: number) => {
       const staged = stagedFilesRef.current[stagedIndex];
       if (!staged || !project) return;
 
-      // Remove from staged immediately
       setStagedFiles((prev) => prev.filter((_, i) => i !== stagedIndex));
-
       toast.info(`Uploading ${staged.name}...`);
 
       try {
-        // Upload the file
         const res = await api.uploadClips(project.id, [staged.file], [staged.duration]);
         const newClips = res.data as Clip[];
         URL.revokeObjectURL(staged.objectUrl);
@@ -104,43 +124,14 @@ export default function WorkspacePage() {
           return;
         }
 
-        const newClip = newClips[0];
-
-        // Figure out where to insert based on insertAtTime
-        // Get current clip order and compute cumulative durations
-        const currentClips = await api.getClips(project.id);
-        const ordered = [...(currentClips.data || [])].sort(
-          (a: Clip, b: Clip) => a.clip_order - b.clip_order
-        );
-
-        // Find the clip index where insertAtTime falls
-        let insertIdx = ordered.length; // default: end
-        let cumTime = 0;
-        for (let i = 0; i < ordered.length; i++) {
-          if (ordered[i].id === newClip.id) continue; // skip the newly uploaded clip
-          cumTime += ordered[i].duration;
-          if (cumTime >= insertAtTime) {
-            insertIdx = i + 1;
-            break;
-          }
-        }
-
-        // Build new order: remove new clip from its current position, insert at target
-        const withoutNew = ordered.filter((c: Clip) => c.id !== newClip.id);
-        withoutNew.splice(insertIdx, 0, newClip);
-        const newOrder = withoutNew.map((c: Clip) => c.id);
-
-        await api.reorderClips(project.id, newOrder);
-
-        // Refresh, trigger reanalysis, and full reset player to clean state
+        await reorderNewClip(project.id, newClips[0].id, insertAtTime);
         toast.success(`${staged.name} added to timeline`);
-        handleAddClipsComplete(newClips);
-        resetPlayer();
+        window.location.reload();
       } catch {
         toast.error(`Failed to add ${staged.name}`);
       }
     },
-    [project, handleAddClipsComplete, resetPlayer]
+    [project]
   );
 
   /** When an existing clip is dragged from gallery and dropped on timeline (re-add / duplicate) */
@@ -148,7 +139,6 @@ export default function WorkspacePage() {
     async (clipId: string, insertAtTime: number) => {
       if (!project) return;
 
-      // Find the clip in the current clips array
       const sourceClip = clips.find((c) => c.id === clipId);
       if (!sourceClip || !sourceClip.storage_path) {
         toast.error("Clip not found");
@@ -158,14 +148,12 @@ export default function WorkspacePage() {
       toast.info(`Duplicating ${sourceClip.filename}...`);
 
       try {
-        // Fetch the video blob from Supabase storage
         const storageUrl = `https://bznswadiiqulyzpkajqp.supabase.co/storage/v1/object/public/media/${sourceClip.storage_path}`;
         const response = await fetch(storageUrl);
         if (!response.ok) throw new Error("Failed to fetch clip");
         const blob = await response.blob();
         const file = new File([blob], sourceClip.filename, { type: blob.type || "video/mp4" });
 
-        // Upload as a new clip
         const res = await api.uploadClips(project.id, [file], [sourceClip.duration]);
         const newClips = res.data as Clip[];
 
@@ -174,39 +162,14 @@ export default function WorkspacePage() {
           return;
         }
 
-        const newClip = newClips[0];
-
-        // Reorder to place at the correct position
-        const currentClips = await api.getClips(project.id);
-        const ordered = [...(currentClips.data || [])].sort(
-          (a: Clip, b: Clip) => a.clip_order - b.clip_order
-        );
-
-        let insertIdx = ordered.length;
-        let cumTime = 0;
-        for (let i = 0; i < ordered.length; i++) {
-          if (ordered[i].id === newClip.id) continue;
-          cumTime += ordered[i].duration;
-          if (cumTime >= insertAtTime) {
-            insertIdx = i + 1;
-            break;
-          }
-        }
-
-        const withoutNew = ordered.filter((c: Clip) => c.id !== newClip.id);
-        withoutNew.splice(insertIdx, 0, newClip);
-        const newOrder = withoutNew.map((c: Clip) => c.id);
-
-        await api.reorderClips(project.id, newOrder);
-
+        await reorderNewClip(project.id, newClips[0].id, insertAtTime);
         toast.success(`${sourceClip.filename} duplicated into timeline`);
-        handleAddClipsComplete(newClips);
-        resetPlayer();
+        window.location.reload();
       } catch {
         toast.error(`Failed to duplicate ${sourceClip.filename}`);
       }
     },
-    [project, clips, handleAddClipsComplete, resetPlayer]
+    [project, clips]
   );
 
   const handleSkipPrev = useCallback(() => {
