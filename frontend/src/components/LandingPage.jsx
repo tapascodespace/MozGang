@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Spotlight } from '@/components/ui/spotlight';
 import { Boxes } from '@/components/ui/background-boxes';
+import { TextShimmer } from '@/components/ui/text-shimmer';
 
 // --- Scroll-reveal wrapper ---
 function Reveal({ children, style, className = '', delay = 0 }) {
@@ -53,16 +54,16 @@ const sectionLabel = {
   letterSpacing: '0.15em',
   textTransform: 'uppercase',
   color: '#b87aff',
-  fontFamily: "'DM Sans', sans-serif",
+  fontFamily: "'Plus Jakarta Sans', sans-serif",
   marginBottom: 16,
 };
 
 // Section heading style
 const sectionHeading = {
-  fontFamily: "'DM Serif Display', serif",
+  fontFamily: "'Plus Jakarta Sans', sans-serif",
   color: '#fff',
   fontSize: 'clamp(2rem, 5vw, 3.5rem)',
-  fontWeight: 700,
+  fontWeight: 800,
   lineHeight: 1.1,
   letterSpacing: '-0.02em',
   marginBottom: 20,
@@ -133,7 +134,7 @@ function HeroSection({ onEnter }) {
             boxShadow: '0 0 80px rgba(184,122,255,0.2), inset 0 0 40px rgba(0,0,0,0.6)',
           }}>
             <img
-              src={MOZART_IMG} alt="Mozart"
+              src={MOZART_IMG} alt=""
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               crossOrigin="anonymous" loading="eager"
             />
@@ -167,9 +168,9 @@ function HeroSection({ onEnter }) {
         {/* Title */}
         <motion.h1
           style={{
-            fontFamily: "'DM Serif Display', serif",
+            fontFamily: "'Plus Jakarta Sans', sans-serif",
             fontSize: 'clamp(3.5rem, 10vw, 9rem)',
-            fontWeight: 700,
+            fontWeight: 800,
             letterSpacing: '-0.04em',
             lineHeight: 0.95,
             color: '#b87aff',
@@ -180,25 +181,30 @@ function HeroSection({ onEnter }) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.4 }}
         >
-          amadeus
+          Amadeus
         </motion.h1>
 
         {/* Tagline */}
-        <motion.p
-          style={{
-            fontFamily: "'DM Sans', sans-serif",
-            fontSize: 'clamp(1.1rem, 2.5vw, 1.5rem)',
-            color: 'rgba(255,255,255,0.55)',
-            maxWidth: 460,
-            lineHeight: 1.5,
-            marginBottom: 48,
-          }}
+        <motion.div
+          style={{ marginBottom: 48 }}
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.6 }}
         >
-          Your video deserves a soundtrack
-        </motion.p>
+          <TextShimmer
+            as="p"
+            duration={3}
+            spread={3}
+            style={{
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
+              fontSize: 'clamp(1.1rem, 2.5vw, 1.5rem)',
+              maxWidth: 460,
+              lineHeight: 1.5,
+            }}
+          >
+            Your video deserves a soundtrack
+          </TextShimmer>
+        </motion.div>
 
         {/* CTA */}
         <motion.button
@@ -208,7 +214,7 @@ function HeroSection({ onEnter }) {
             padding: '14px 36px', borderRadius: 999, fontSize: 15, fontWeight: 600,
             background: 'linear-gradient(135deg, #b87aff, #9333ea)',
             color: '#fff', border: 'none', cursor: 'pointer',
-            fontFamily: "'DM Sans', sans-serif",
+            fontFamily: "'Plus Jakarta Sans', sans-serif",
             boxShadow: '0 0 40px rgba(184,122,255,0.3)',
           }}
           initial={{ opacity: 0, y: 16 }}
@@ -237,7 +243,7 @@ function HeroSection({ onEnter }) {
           animate={{ opacity: 0.35 }}
           transition={{ delay: 1.8 }}
         >
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: "'DM Sans', sans-serif" }}>
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
             Scroll to explore
           </span>
           <motion.div
@@ -281,7 +287,7 @@ function HowItWorks() {
               <div style={{ textAlign: 'center' }}>
                 {/* Large faded number */}
                 <div style={{
-                  fontFamily: "'DM Serif Display', serif",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 72, fontWeight: 700,
                   color: 'rgba(184,122,255,0.08)',
                   lineHeight: 1, marginBottom: -8,
@@ -301,7 +307,7 @@ function HowItWorks() {
 
                 {/* Title */}
                 <h3 style={{
-                  fontFamily: "'DM Sans', sans-serif",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 20, fontWeight: 600, color: '#fff', marginBottom: 10,
                 }}>
                   {step.title}
@@ -309,7 +315,7 @@ function HowItWorks() {
 
                 {/* Desc */}
                 <p style={{
-                  fontFamily: "'DM Sans', sans-serif",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 14, color: 'rgba(255,255,255,0.4)',
                   lineHeight: 1.7, maxWidth: 300, margin: '0 auto',
                 }}>
@@ -328,82 +334,101 @@ function HowItWorks() {
 // FEATURES — Bento grid
 // ════════════════════════════════════════════════════════
 const features = [
-  { icon: Brain, title: 'GPT-4o Vision Analysis', desc: 'Every frame is analyzed for scene type, emotional tone, and pacing. The AI understands your story before composing a single note.', wide: true },
-  { icon: AudioWaveform, title: 'AI Music Generation', desc: 'ElevenLabs Sound Generation creates unique tracks tailored to each section\'s mood and energy.' },
-  { icon: Scissors, title: 'Section Editing', desc: 'Merge, split, and resize sections on the timeline with millisecond precision.' },
-  { icon: RefreshCw, title: 'Iterative Refinement', desc: 'Give natural language feedback and regenerate. Each iteration builds on the last.' },
-  { icon: Layers, title: 'Multi-Section Scoring', desc: 'Hook, Build, Climax, Outro — each section gets its own unique music matching the visual energy.' },
-  { icon: Film, title: 'Synced Preview', desc: 'Watch your video with generated music synced in real-time. See exactly how it feels before exporting.', wide: true },
+  { icon: Brain, title: 'Vision Analysis', desc: 'AI reads every frame for tone, pacing, and story.' },
+  { icon: AudioWaveform, title: 'Music Generation', desc: 'Unique tracks shaped to each section\'s energy.' },
+  { icon: Scissors, title: 'Section Editing', desc: 'Merge, split, resize with millisecond precision.' },
+  { icon: RefreshCw, title: 'Refinement', desc: 'Describe changes in plain English. Regenerate.' },
+  { icon: Layers, title: 'Multi-Section', desc: 'Hook, Build, Climax — each scored independently.' },
+  { icon: Film, title: 'Synced Preview', desc: 'Watch video with generated music in real-time.' },
 ];
-
-const cardStyle = {
-  background: 'rgba(255,255,255,0.025)',
-  border: '1px solid rgba(255,255,255,0.06)',
-  borderRadius: 16,
-  padding: 28,
-  transition: 'all 0.3s ease',
-};
 
 function Features() {
   return (
-    <section style={{ background: '#000', padding: '140px 0' }}>
+    <section style={{ background: '#000', padding: '120px 0' }}>
       <div style={container}>
-        <div style={{ textAlign: 'center', marginBottom: 64 }}>
-          <Reveal><p style={sectionLabel}>Features</p></Reveal>
-          <Reveal delay={0.1}>
-            <h2 style={sectionHeading}>
-              Everything you need to<br />
-              <span style={{ color: '#b87aff' }}>score your content</span>
-            </h2>
-          </Reveal>
-          <Reveal delay={0.15}>
-            <p style={{
-              fontFamily: "'DM Sans', sans-serif",
-              fontSize: 16, color: 'rgba(255,255,255,0.35)',
-              maxWidth: 520, margin: '0 auto', lineHeight: 1.7,
-            }}>
-              From AI-powered video analysis to iterative music generation,
-              amadeus handles the entire scoring pipeline.
-            </p>
-          </Reveal>
-        </div>
+        <Reveal>
+          <h2 style={{
+            ...sectionHeading,
+            textAlign: 'center',
+            marginBottom: 60,
+          }}>
+            Built for <span style={{ color: '#b87aff' }}>creators</span>
+          </h2>
+        </Reveal>
 
+        {/* Top row: 3 columns */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 16,
+          gap: 1,
+          background: 'rgba(255,255,255,0.06)',
+          borderRadius: 16,
+          overflow: 'hidden',
+          marginBottom: 1,
         }}>
-          {features.map((feat, i) => (
-            <Reveal
-              key={feat.title}
-              delay={0.06 * i}
-              style={feat.wide ? { gridColumn: 'span 2' } : {}}
-            >
+          {features.slice(0, 3).map((feat, i) => (
+            <Reveal key={feat.title} delay={0.06 * i}>
               <motion.div
-                style={cardStyle}
-                whileHover={{
-                  background: 'rgba(184,122,255,0.05)',
-                  borderColor: 'rgba(184,122,255,0.15)',
+                style={{
+                  background: '#0a0a0a',
+                  padding: '40px 32px',
+                  cursor: 'default',
+                  height: '100%',
                 }}
+                whileHover={{ background: 'rgba(184,122,255,0.04)' }}
               >
-                <div style={{
-                  width: 40, height: 40, borderRadius: 10,
-                  background: 'rgba(184,122,255,0.08)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  marginBottom: 16,
-                }}>
-                  <feat.icon size={18} color="#b87aff" />
-                </div>
+                <feat.icon size={22} color="#b87aff" style={{ marginBottom: 18 }} />
                 <h3 style={{
-                  fontFamily: "'DM Sans', sans-serif",
-                  fontSize: 16, fontWeight: 600, color: '#fff', marginBottom: 8,
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  fontSize: 17, fontWeight: 700, color: '#fff',
+                  letterSpacing: '-0.01em', marginBottom: 8,
                 }}>
                   {feat.title}
                 </h3>
                 <p style={{
-                  fontFamily: "'DM Sans', sans-serif",
-                  fontSize: 14, color: 'rgba(255,255,255,0.38)',
-                  lineHeight: 1.7,
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  fontSize: 14, color: 'rgba(255,255,255,0.4)',
+                  lineHeight: 1.5,
+                }}>
+                  {feat.desc}
+                </p>
+              </motion.div>
+            </Reveal>
+          ))}
+        </div>
+
+        {/* Bottom row: 3 columns */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 1,
+          background: 'rgba(255,255,255,0.06)',
+          borderRadius: 16,
+          overflow: 'hidden',
+        }}>
+          {features.slice(3, 6).map((feat, i) => (
+            <Reveal key={feat.title} delay={0.06 * (i + 3)}>
+              <motion.div
+                style={{
+                  background: '#0a0a0a',
+                  padding: '40px 32px',
+                  cursor: 'default',
+                  height: '100%',
+                }}
+                whileHover={{ background: 'rgba(184,122,255,0.04)' }}
+              >
+                <feat.icon size={22} color="#b87aff" style={{ marginBottom: 18 }} />
+                <h3 style={{
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  fontSize: 17, fontWeight: 700, color: '#fff',
+                  letterSpacing: '-0.01em', marginBottom: 8,
+                }}>
+                  {feat.title}
+                </h3>
+                <p style={{
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  fontSize: 14, color: 'rgba(255,255,255,0.4)',
+                  lineHeight: 1.5,
                 }}>
                   {feat.desc}
                 </p>
@@ -449,7 +474,7 @@ function Pipeline() {
           </Reveal>
           <Reveal delay={0.15}>
             <p style={{
-              fontFamily: "'DM Sans', sans-serif",
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
               fontSize: 16, color: 'rgba(255,255,255,0.35)',
               maxWidth: 480, margin: '0 auto', lineHeight: 1.7,
             }}>
@@ -486,19 +511,19 @@ function Pipeline() {
                     background: '#b87aff', color: '#000',
                     fontSize: 10, fontWeight: 700,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: "'DM Sans', sans-serif",
+                    fontFamily: "'Plus Jakarta Sans', sans-serif",
                   }}>
                     {i + 1}
                   </span>
                 </motion.div>
                 <h4 style={{
-                  fontFamily: "'DM Sans', sans-serif",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 13, fontWeight: 600, color: '#fff', marginBottom: 4,
                 }}>
                   {step.label}
                 </h4>
                 <p style={{
-                  fontFamily: "'DM Sans', sans-serif",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: 11, color: 'rgba(255,255,255,0.28)',
                 }}>
                   {step.sub}
@@ -555,7 +580,7 @@ function SectionTypes() {
             </Reveal>
             <Reveal delay={0.15}>
               <p style={{
-                fontFamily: "'DM Sans', sans-serif",
+                fontFamily: "'Plus Jakarta Sans', sans-serif",
                 fontSize: 15, color: 'rgba(255,255,255,0.38)',
                 lineHeight: 1.8, marginBottom: 28,
               }}>
@@ -572,7 +597,7 @@ function SectionTypes() {
                     background: 'rgba(184,122,255,0.07)',
                     color: 'rgba(184,122,255,0.65)',
                     border: '1px solid rgba(184,122,255,0.1)',
-                    fontFamily: "'DM Sans', sans-serif",
+                    fontFamily: "'Plus Jakarta Sans', sans-serif",
                   }}>
                     {tone}
                   </span>
@@ -587,8 +612,11 @@ function SectionTypes() {
               <Reveal key={sec.name} delay={0.06 * i}>
                 <motion.div
                   style={{
-                    ...cardStyle,
+                    background: 'rgba(255,255,255,0.025)',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    borderRadius: 16,
                     padding: 20,
+                    transition: 'all 0.3s ease',
                   }}
                   whileHover={{
                     background: `rgba(${parseInt(sec.color.slice(1,3),16)},${parseInt(sec.color.slice(3,5),16)},${parseInt(sec.color.slice(5,7),16)},0.06)`,
@@ -602,14 +630,14 @@ function SectionTypes() {
                       boxShadow: `0 0 8px ${sec.color}40`,
                     }} />
                     <span style={{
-                      fontFamily: "'DM Sans', sans-serif",
+                      fontFamily: "'Plus Jakarta Sans', sans-serif",
                       fontSize: 14, fontWeight: 600, color: '#fff',
                     }}>
                       {sec.name}
                     </span>
                   </div>
                   <p style={{
-                    fontFamily: "'DM Sans', sans-serif",
+                    fontFamily: "'Plus Jakarta Sans', sans-serif",
                     fontSize: 12, color: 'rgba(255,255,255,0.32)',
                     lineHeight: 1.5,
                   }}>
@@ -652,7 +680,7 @@ function CTAFooter({ onEnter }) {
         </Reveal>
         <Reveal delay={0.15}>
           <p style={{
-            fontFamily: "'DM Sans', sans-serif",
+            fontFamily: "'Plus Jakarta Sans', sans-serif",
             fontSize: 16, color: 'rgba(255,255,255,0.35)',
             marginBottom: 36, maxWidth: 440, margin: '0 auto 36px',
             lineHeight: 1.7,
@@ -669,7 +697,7 @@ function CTAFooter({ onEnter }) {
               padding: '14px 40px', borderRadius: 999, fontSize: 15, fontWeight: 600,
               background: 'linear-gradient(135deg, #b87aff, #9333ea)',
               color: '#fff', border: 'none', cursor: 'pointer',
-              fontFamily: "'DM Sans', sans-serif",
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
               boxShadow: '0 0 40px rgba(184,122,255,0.25)',
             }}
             whileHover={{ scale: 1.05, boxShadow: '0 0 60px rgba(184,122,255,0.45)' }}
@@ -688,13 +716,13 @@ function CTAFooter({ onEnter }) {
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
             <p style={{
-              fontFamily: "'DM Sans', sans-serif",
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
               fontSize: 13, color: 'rgba(184,122,255,0.45)',
             }}>
               Team MozartWolfgang
             </p>
             <p style={{
-              fontFamily: "'DM Sans', sans-serif",
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
               fontSize: 12, color: 'rgba(255,255,255,0.18)',
             }}>
               Built with GPT-4o Vision &middot; ElevenLabs &middot; FastAPI &middot; React
