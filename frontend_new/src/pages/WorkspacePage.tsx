@@ -56,6 +56,7 @@ export default function WorkspacePage() {
     handleSeeked,
     handleVideoError,
     videoError,
+    resetPlayer,
   } = useVideoPlayer({ clips, sections, tracks });
 
   // Sync volume to video/audio elements
@@ -131,15 +132,15 @@ export default function WorkspacePage() {
 
         await api.reorderClips(project.id, newOrder);
 
-        // Refresh, trigger reanalysis, and reset cursor to beginning
+        // Refresh, trigger reanalysis, and full reset player to clean state
         toast.success(`${staged.name} added to timeline`);
         handleAddClipsComplete(newClips);
-        performSeek(0);
+        resetPlayer();
       } catch {
         toast.error(`Failed to add ${staged.name}`);
       }
     },
-    [project, handleAddClipsComplete, performSeek]
+    [project, handleAddClipsComplete, resetPlayer]
   );
 
   /** When an existing clip is dragged from gallery and dropped on timeline (re-add / duplicate) */
@@ -200,12 +201,12 @@ export default function WorkspacePage() {
 
         toast.success(`${sourceClip.filename} duplicated into timeline`);
         handleAddClipsComplete(newClips);
-        performSeek(0);
+        resetPlayer();
       } catch {
         toast.error(`Failed to duplicate ${sourceClip.filename}`);
       }
     },
-    [project, clips, handleAddClipsComplete, performSeek]
+    [project, clips, handleAddClipsComplete, resetPlayer]
   );
 
   const handleSkipPrev = useCallback(() => {

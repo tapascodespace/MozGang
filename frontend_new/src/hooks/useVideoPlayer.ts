@@ -86,42 +86,56 @@ export function useVideoPlayer({ clips, sections, tracks }: UseVideoPlayerProps)
     currentClipIndexRef.current = currentClipIndex;
   }, [currentClipIndex]);
 
-  // ── Resync currentClipIndex when clips change (e.g. after insert/reorder) ──
-  useEffect(() => {
-    if (derivedClips.length === 0) return;
-    const lt = localTime;
-    let idx = 0;
-    for (let i = 0; i < derivedClips.length; i++) {
-      if (lt >= derivedClips[i].__start && lt < derivedClips[i].__end) {
-        idx = i;
-        break;
-      }
-      if (i === derivedClips.length - 1) idx = i;
-    }
-    if (idx !== currentClipIndexRef.current) {
-      log("RESYNC", `Clip index ${currentClipIndexRef.current} -> ${idx} after clips change`, {
-        localTime: lt.toFixed(2),
-        clipStart: derivedClips[idx].__start.toFixed(2),
-        clipEnd: derivedClips[idx].__end.toFixed(2),
-      });
-      currentClipIndexRef.current = idx;
-      setCurrentClipIndex(idx);
+  /** Full soft-reset: nuke all player state and let the effect chain rebuild from scratch.
+   *  Call this after clips change (add/reorder) instead of trying to patch in-place. */
+  const resetPlayer = useCallback(() => {
+    log("RESET", "Full player reset requested");
 
-      // Load the correct clip on the active element
-      syncVideoRef();
-      if (videoRef.current && clipUrls[idx]) {
-        videoRef.current.src = clipUrls[idx];
-        videoRef.current.load();
-        const offset = Math.max(0, lt - derivedClips[idx].__start);
-        videoRef.current.onloadedmetadata = () => {
-          if (videoRef.current) {
-            videoRef.current.currentTime = offset;
-          }
-        };
-      }
+    // 1. Pause everything
+    if (videoARef.current) videoARef.current.pause();
+    if (videoBRef.current) videoBRef.current.pause();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.removeAttribute("src");
+      audioRef.current.load();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [derivedClips, clipUrls, syncVideoRef]);
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+
+    // 2. Reset to slot A
+    activeSlotRef.current = 0;
+    videoRef.current = videoARef.current;
+    setDisplaySlot(0);
+
+    // 3. Reset all refs
+    currentClipIndexRef.current = 0;
+    preloadedClipIdx.current = -1;
+    pendingSeekRef.current = null;
+    pendingPlayRef.current = false;
+    seekingUntil.current = 0;
+
+    // 4. Reset all state
+    setCurrentClipIndex(0);
+    setLocalTime(0);
+    setVideoError(null);
+    setClipActualDurations([]);
+    setCurrentTrackUrl(null);
+
+    // 5. Clear both video element sources so effects re-load from scratch
+    if (videoARef.current) {
+      videoARef.current.removeAttribute("src");
+      videoARef.current.load();
+    }
+    if (videoBRef.current) {
+      videoBRef.current.removeAttribute("src");
+      videoBRef.current.load();
+    }
+
+    // 6. Force clipUrls to empty so the rebuild effect re-triggers the load chain
+    setClipUrls([]);
+
+    log("RESET", "Player state cleared — effects will rebuild");
+  }, []);
 
   // ── Build clip URLs ──
   useEffect(() => {
@@ -666,5 +680,6 @@ export function useVideoPlayer({ clips, sections, tracks }: UseVideoPlayerProps)
     videoError,
     progress,
     derivedClips,
+    resetPlayer,
   };
 }
