@@ -245,6 +245,7 @@ export default function SectionPanel({
   onUpdateSection,
   onGenerateMusic,
   onRegenerateMusic,
+  onReanalyzeSection,
   onEditBrief,
 }) {
   const [briefOpen, setBriefOpen] = useState(true);
@@ -261,6 +262,7 @@ export default function SectionPanel({
 
   const isGenerating = section.music_status === 'GENERATING';
   const isReady = section.music_status === 'READY';
+  const isAnalyzing = section.analysis_status === 'ANALYZING';
   const track = section.generated_track;
 
   function handleFieldChange(field, value) {
@@ -279,6 +281,12 @@ export default function SectionPanel({
     if (onRegenerateMusic) {
       onRegenerateMusic(section.id, feedback);
       setFeedback('');
+    }
+  }
+
+  function handleReanalyze() {
+    if (!isAnalyzing && onReanalyzeSection) {
+      onReanalyzeSection(section.id);
     }
   }
 
@@ -340,9 +348,26 @@ export default function SectionPanel({
 
         {/* ──────── 2. Section Details ──────── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <span style={{ ...labelStyle, marginBottom: 0 }}>
-            Section Details
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ ...labelStyle, marginBottom: 0 }}>
+              Section Details
+            </span>
+            {onReanalyzeSection && (
+              <button
+                style={{
+                  ...styles.editLink,
+                  marginTop: 0,
+                  opacity: isAnalyzing ? 0.5 : 1,
+                  cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+                }}
+                onClick={handleReanalyze}
+                disabled={isAnalyzing}
+                title="Re-analyze this section with AI"
+              >
+                {isAnalyzing ? 'Analyzing...' : 'Re-analyze'}
+              </button>
+            )}
+          </div>
 
           {/* section_type – dropdown */}
           <div style={styles.fieldGroup}>

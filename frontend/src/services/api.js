@@ -68,4 +68,24 @@ export const triggerExport = (projectId) =>
 export const getTracks = (projectId) =>
   api.get(`/projects/${projectId}/tracks`);
 
+// Pre-analysis (runs frame extraction, transcription, scene detection, auto-boundaries)
+export const startPreAnalysis = (projectId, vibe = null) =>
+  api.post(`/projects/${projectId}/pre-analyze`, { vibe });
+
+// Get pre-analysis status and results
+export const getPreAnalysisStatus = (projectId) =>
+  api.get(`/projects/${projectId}/pre-analysis-status`);
+
+// Set user's selected vibe and get music style recommendation
+export const setVibe = (projectId, vibe) =>
+  api.post(`/projects/${projectId}/vibe`, { vibe });
+
+// Confirm music style (gold standard for all sections)
+export const confirmMusicStyle = (projectId, musicStyle) =>
+  api.post(`/projects/${projectId}/confirm-style`, { music_style: musicStyle });
+
+// Re-analyze a section (after merge/split)
+export const reanalyzeSection = (projectId, sectionId) =>
+  api.post(`/projects/${projectId}/sections/${sectionId}/reanalyze`);
+
 export default api;

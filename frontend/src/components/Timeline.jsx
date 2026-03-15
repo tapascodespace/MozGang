@@ -295,6 +295,18 @@ const S = {
     background: TOKEN.stroke,
     margin: '4px 0',
   },
+  addClipsBtn: {
+    padding: '5px 12px',
+    background: 'rgba(69,245,197,0.15)',
+    border: `1px solid ${TOKEN.accent}`,
+    borderRadius: 6,
+    color: TOKEN.accent,
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: 'pointer',
+    marginRight: 12,
+    transition: 'background 0.15s',
+  },
 };
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -311,6 +323,7 @@ export default function Timeline({
   onZoomChange,
   onMergeSections,
   onSplitAtCursor,
+  onAddClips,
 }) {
   ensurePulseKeyframes();
 
@@ -547,6 +560,16 @@ export default function Timeline({
 
       {/* Zoom controls */}
       <div style={S.zoomBar}>
+        {onAddClips && (
+          <button
+            type="button"
+            style={S.addClipsBtn}
+            onClick={onAddClips}
+            aria-label="Add more clips"
+          >
+            + Add Clips
+          </button>
+        )}
         <span style={{ fontSize: 10, color: TOKEN.text, opacity: 0.6 }}>
           Right-click to split
         </span>

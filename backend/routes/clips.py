@@ -246,6 +246,30 @@ async def upload_clips(
         "total_duration": current_end
     }).eq("id", project_id).execute()
 
+    # Extend last section if new clips extend beyond existing sections
+    sections_result = supabase.table("sections").select("*").eq(
+        "project_id", project_id
+    ).order("section_order", desc=True).limit(1).execute()
+
+    if sections_result.data:
+        last_section = sections_result.data[0]
+        if current_end > last_section["end_time"]:
+            # Extend last section to cover new clips
+            new_duration = current_end - last_section["start_time"]
+            new_clip_ids = last_section.get("clip_ids", []) or []
+            # Add new clip IDs to the section
+            for clip in uploaded_clips:
+                if clip["id"] not in new_clip_ids:
+                    new_clip_ids.append(clip["id"])
+
+            supabase.table("sections").update({
+                "end_time": current_end,
+                "duration": new_duration,
+                "clip_ids": new_clip_ids,
+                "music_status": "PENDING",  # Reset music status since section changed
+            }).eq("id", last_section["id"]).execute()
+            logger.info(f"[UPLOAD] Extended last section to {current_end:.2f}s (added {len(uploaded_clips)} clip(s))")
+
     logger.info(f"[UPLOAD] ========== Upload complete: {len(uploaded_clips)}/{len(files)} clips, total duration {current_end:.2f}s ==========")
 
     if len(uploaded_clips) == 0:

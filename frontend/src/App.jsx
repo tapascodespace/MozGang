@@ -3,16 +3,20 @@ import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
 import ImportScreen from './components/ImportScreen';
 import CreativeBrief from './components/CreativeBrief';
+import VibeSelector from './components/VibeSelector';
+import AIRecommendation from './components/AIRecommendation';
 import ProgressOverlay from './components/ProgressOverlay';
 import TopBar from './components/TopBar';
 import PreviewPlayer from './components/PreviewPlayer';
 import Timeline from './components/Timeline';
 import SectionPanel from './components/SectionPanel';
+import AddClipsModal from './components/AddClipsModal';
 import { supabase } from './services/supabase';
 import * as api from './services/api';
 
 export default function App() {
-  const [view, setView] = useState('import'); // import | brief | analyzing | workspace
+  // Views: import | vibe | recommendation | analyzing | workspace
+  const [view, setView] = useState('import');
   const [project, setProject] = useState(null);
   const [clips, setClips] = useState([]);
   const [sections, setSections] = useState([]);
@@ -21,6 +25,11 @@ export default function App() {
   const [zoomLevel, setZoomLevel] = useState(10);
   const [currentTime, setCurrentTime] = useState(0);
   const [editingBrief, setEditingBrief] = useState(false);
+  const [showAddClipsModal, setShowAddClipsModal] = useState(false);
+
+  // New simplified onboarding state
+  const [selectedVibe, setSelectedVibe] = useState(null);
+  const [recommendationData, setRecommendationData] = useState(null);
 
   const selectedSection = sections.find((s) => s.id === selectedSectionId) || null;
   const hasReadyTracks = sections.some((s) => s.music_status === 'READY');
@@ -59,7 +68,22 @@ export default function App() {
   const handleImportComplete = useCallback((projectData, clipsData) => {
     setProject(projectData);
     setClips(clipsData);
-    setView('brief');
+    // New flow: go to vibe selector instead of full brief
+    setView('vibe');
+  }, []);
+
+  const handleVibeSelected = useCallback((data) => {
+    setSelectedVibe(data.vibe);
+    setRecommendationData({
+      video_structure: data.video_structure,
+      theme_summary: data.theme_summary,
+      recommended_music_style: data.recommended_music_style,
+    });
+    setView('recommendation');
+  }, []);
+
+  const handleBackToVibe = useCallback(() => {
+    setView('vibe');
   }, []);
 
   const handleBriefComplete = useCallback(async (sectionsData) => {
@@ -181,6 +205,33 @@ export default function App() {
     }
   }, [project]);
 
+  const handleReanalyzeSection = useCallback(async (sectionId) => {
+    try {
+      const res = await api.reanalyzeSection(project.id, sectionId);
+      if (res.data.message) {
+        toast(res.data.message, { icon: '🔄' });
+      }
+    } catch (e) {
+      toast.error('Failed to start re-analysis');
+    }
+  }, [project]);
+
+  const handleAddClipsComplete = useCallback(async (newClips) => {
+    // Append new clips to state
+    setClips((prev) => [...prev, ...newClips]);
+    setShowAddClipsModal(false);
+
+    // Refresh sections list (in case backend extended last section)
+    try {
+      const sectionsRes = await api.getSections(project.id);
+      setSections(sectionsRes.data || []);
+    } catch (e) {
+      // ignore
+    }
+
+    toast.success(`${newClips.length} clip${newClips.length > 1 ? 's' : ''} added to timeline`);
+  }, [project]);
+
   const handleExport = useCallback(async () => {
     toast('Export available in Phase 2', { icon: 'ℹ️' });
   }, []);
@@ -203,6 +254,26 @@ export default function App() {
         <ImportScreen onComplete={handleImportComplete} />
       )}
 
+      {view === 'vibe' && (
+        <VibeSelector
+          project={project}
+          onVibeSelected={handleVibeSelected}
+        />
+      )}
+
+      {view === 'recommendation' && (
+        <AIRecommendation
+          project={project}
+          vibe={selectedVibe}
+          videoStructure={recommendationData?.video_structure}
+          themeSummary={recommendationData?.theme_summary}
+          recommendedStyle={recommendationData?.recommended_music_style}
+          onComplete={handleBriefComplete}
+          onBack={handleBackToVibe}
+        />
+      )}
+
+      {/* Legacy brief view - kept for backward compatibility */}
       {view === 'brief' && (
         <CreativeBrief
           project={project}
@@ -218,6 +289,13 @@ export default function App() {
       {view === 'workspace' && (
         <>
           <TopBar hasReadyTracks={hasReadyTracks} onExport={handleExport} />
+          {showAddClipsModal && (
+            <AddClipsModal
+              projectId={project.id}
+              onClose={() => setShowAddClipsModal(false)}
+              onComplete={handleAddClipsComplete}
+            />
+          )}
           {editingBrief && (
             <CreativeBrief
               project={project}
@@ -253,6 +331,7 @@ export default function App() {
                   onZoomChange={setZoomLevel}
                   onMergeSections={handleMergeSections}
                   onSplitAtCursor={handleSplitAtCursor}
+                  onAddClips={() => setShowAddClipsModal(true)}
                 />
               </div>
             </div>
@@ -262,6 +341,7 @@ export default function App() {
               onUpdateSection={handleUpdateSection}
               onGenerateMusic={handleGenerateMusic}
               onRegenerateMusic={handleRegenerateMusic}
+              onReanalyzeSection={handleReanalyzeSection}
               onEditBrief={() => setEditingBrief(true)}
             />
           </div>

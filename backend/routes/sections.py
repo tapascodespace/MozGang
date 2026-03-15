@@ -4,6 +4,7 @@ from database import supabase
 from models import SectionUpdate, MergeRequest, ResizeRequest, SplitRequest, RegenerateRequest
 from config import SECTION_TYPES
 from services.music_service import generate_music_for_section
+from services.analysis_service import reanalyze_section
 
 logger = logging.getLogger("scoreflow.sections")
 
@@ -183,6 +184,78 @@ async def regenerate_music(
     )
 
     return {"status": "generating", "message": "Music regeneration started"}
+
+
+@router.post("/projects/{project_id}/sections/{section_id}/reanalyze")
+async def reanalyze_section_endpoint(
+    project_id: str,
+    section_id: str,
+    background_tasks: BackgroundTasks
+):
+    """Re-analyze a section after merge/split operations."""
+    # Verify section exists
+    section_result = supabase.table("sections").select("*").eq("id", section_id).execute()
+    if not section_result.data:
+        raise HTTPException(status_code=404, detail="Section not found")
+
+    section = section_result.data[0]
+
+    # Check if already analyzing
+    if section.get("analysis_status") == "ANALYZING":
+        return {"status": "analyzing", "message": "Re-analysis already in progress"}
+
+    # Verify project and get brief
+    project_result = supabase.table("projects").select("*").eq("id", project_id).execute()
+    if not project_result.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = project_result.data[0]
+
+    # Get all clips for this project
+    clips_result = supabase.table("clips").select("*").eq(
+        "project_id", project_id
+    ).order("clip_order").execute()
+
+    clips = clips_result.data
+
+    # Build brief from project data
+    brief = {
+        "overall_energy": project.get("overall_energy", "Medium energy"),
+        "music_style_direction": project.get("music_style_direction", "Modern background music"),
+        "references_text": project.get("references_text", ""),
+    }
+
+    # Update status to ANALYZING
+    supabase.table("sections").update({
+        "analysis_status": "ANALYZING"
+    }).eq("id", section_id).execute()
+
+    logger.info(f"[SECTIONS] Starting re-analysis for section {section_id[:8]}")
+
+    # Queue background task
+    background_tasks.add_task(
+        _background_reanalyze,
+        section=section,
+        clips=clips,
+        brief=brief,
+        project_id=project_id
+    )
+
+    return {"status": "analyzing", "message": "Re-analysis started"}
+
+
+async def _background_reanalyze(
+    section: dict,
+    clips: list,
+    brief: dict,
+    project_id: str
+):
+    """Background task to re-analyze a section."""
+    try:
+        await reanalyze_section(section, clips, brief, project_id)
+        logger.info(f"[BACKGROUND] Re-analysis complete for section {section['id'][:8]}")
+    except Exception as e:
+        logger.error(f"[BACKGROUND] Re-analysis failed for section {section['id'][:8]}: {e}")
 
 
 @router.post("/projects/{project_id}/sections/merge")

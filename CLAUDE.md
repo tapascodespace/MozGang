@@ -156,15 +156,16 @@ All endpoints prefixed with `/api/`:
 # Projects
 POST   /projects                           Create project
 GET    /projects/{id}                      Get project details
+POST   /projects/{id}/pre-analyze          Start pre-analysis (frame extraction, transcription)
 
 # Clips
-POST   /projects/{id}/clips                Upload clips (multipart)
+POST   /projects/{id}/clips                Upload clips (multipart) - extends last section if needed
 GET    /projects/{id}/clips                Get all clips
 PUT    /projects/{id}/clips/reorder        Reorder clips
 GET    /projects/{id}/clips/{cid}/stream   Stream clip URL
 
 # Brief
-POST   /projects/{id}/brief                Submit brief + trigger analysis
+POST   /projects/{id}/brief                Submit brief + trigger analysis (uses pre-analysis if available)
 PUT    /projects/{id}/brief                Update brief (no auto-regen)
 
 # Sections
@@ -172,6 +173,7 @@ GET    /projects/{id}/sections             Get sections
 PUT    /projects/{id}/sections/{sid}       Update section_type / emotional_tone
 POST   /projects/{id}/sections/{sid}/generate    Trigger music generation
 POST   /projects/{id}/sections/{sid}/regenerate  Regenerate with feedback
+POST   /projects/{id}/sections/{sid}/reanalyze   Re-analyze section with AI (after merge/split)
 POST   /projects/{id}/sections/merge       Merge two adjacent sections
 POST   /projects/{id}/sections/{sid}/split Split at time or clip boundary
 POST   /projects/{id}/sections/{sid}/undo  Restore discarded track
@@ -195,3 +197,108 @@ GET    /projects/{id}/export/download      Download MP4
 
 ## Upload Limits
 - Maximum file size: 50MB per video file
+
+---
+
+## Workspace Enhancement Features
+
+### Feature 1: Add Videos in Workspace
+Users can add more clips after entering the workspace:
+- "+ Add Clips" button in the Timeline zoom bar
+- Opens AddClipsModal with dropzone
+- New clips append to timeline, last section extends automatically
+- Component: `frontend/src/components/AddClipsModal.jsx`
+
+### Feature 2: Pre-Analysis Before Brief
+Frame extraction, transcription, and cut density run immediately after upload:
+- Triggered by `POST /projects/{id}/pre-analyze` (fire-and-forget)
+- Called automatically after upload in ImportScreen
+- When brief is submitted, uses cached data if available (only GPT-4o needed)
+- Reduces perceived wait time significantly
+- Database columns: `pre_analysis_status`, `pre_analysis_frames`, `pre_analysis_transcript`, `pre_analysis_cut_density`
+
+### Feature 3: Re-analyze Sections on Demand
+After merge/split, users can refresh analysis for individual sections:
+- "Re-analyze" button in SectionPanel
+- Calls `POST /projects/{id}/sections/{sid}/reanalyze`
+- Extracts frames and transcribes only for clips in that section
+- Calls GPT-4o to analyze single section
+- Updates section attributes, resets music_status to PENDING
+- Database column: `analysis_status` (PENDING, ANALYZING, COMPLETE, FAILED)
+
+### Database Migration
+Run `migrations/001_workspace_enhancements.sql` to add new columns for existing databases.
+
+---
+
+## Auto Section Detection Feature
+
+### Overview
+Automatically detects scene changes WITHIN clips (not just at clip boundaries) and intelligently groups them into narrative sections based on pacing changes.
+
+### Scene Detection Algorithm
+1. **FFmpeg Scene Detection**: `ffmpeg -filter:v "select='gt(scene,0.3)'"` detects visual scene changes
+2. **Merge Cut Sources**: Combines clip boundaries + internal scene changes
+3. **Rolling Density Calculation**: 5-second windows categorized as MONTAGE/MEDIUM/SLOW/STATIC
+4. **Boundary Detection**: Section boundaries occur where pacing CHANGES, not at every cut
+5. **Guardrails**: Min 10s sections, max 4 boundaries (5 sections), skip videos <30s
+
+### Density Categories (config.py)
+```python
+DENSITY_MONTAGE_THRESHOLD = 1.5   # cuts/sec - Fast-paced, many cuts
+DENSITY_MEDIUM_THRESHOLD = 0.5    # cuts/sec - Active but not frantic
+DENSITY_SLOW_THRESHOLD = 0.1      # cuts/sec - Few cuts, deliberate pacing
+# Below SLOW = STATIC - Continuous shot
+```
+
+### Simplified Onboarding Flow
+```
+BEFORE: Upload → Brief form (3 questions) → Wait → Workspace
+
+AFTER:  Upload → Vibe selector (1 question) → AI Recommendation → Workspace
+```
+
+1. **VibeSelector**: Single question - "What vibe should your video have?"
+   - Options: Energetic, Chill, Dramatic, Playful, Inspirational, etc.
+   - Component: `frontend/src/components/VibeSelector.jsx`
+
+2. **AIRecommendation**: Shows detected video type + recommended music style
+   - User can edit the recommendation
+   - Confirmed style becomes "gold standard" for all sections
+   - Component: `frontend/src/components/AIRecommendation.jsx`
+
+### Gold Standard Music Style
+- The confirmed music style is used as the DEFAULT for all sections
+- Individual sections only deviate if dramatically different (e.g., action moment in calm vlog)
+- Ensures cohesive music across the video
+
+### New API Endpoints
+```
+GET    /projects/{id}/pre-analysis-status  Get status + results (video_structure, theme, style)
+POST   /projects/{id}/vibe                 Set vibe, get music style recommendation
+POST   /projects/{id}/confirm-style        Confirm gold standard music style
+```
+
+### Pre-Analysis Enhanced
+`pre_analyze_video()` now includes:
+- Frame extraction
+- Audio transcription
+- Scene detection (FFmpeg) - NEW
+- Auto-boundary detection - NEW
+- Video structure detection (GPT-4o) - NEW
+- Theme summary - NEW
+- Music style recommendation - NEW
+
+### Database Columns (projects table)
+```sql
+pre_analysis_scene_changes jsonb      -- Detected scene change timestamps
+pre_analysis_auto_boundaries jsonb    -- Suggested section break points
+detected_video_structure text         -- "Vlog", "Tutorial", "Interview", etc.
+detected_theme_summary text           -- AI-detected theme description
+selected_vibe text                    -- User's selected vibe
+recommended_music_style text          -- AI recommendation based on vibe + structure
+confirmed_music_style text            -- "Gold standard" confirmed by user
+```
+
+### Migration
+Run `migrations/002_auto_section_detection.sql` to add new columns.

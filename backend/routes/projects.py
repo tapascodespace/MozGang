@@ -1,8 +1,15 @@
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
+from pydantic import BaseModel
+from typing import Optional
 from database import supabase
 from models import CreativeBrief
-from services.analysis_service import analyze_video
+from services.analysis_service import (
+    analyze_video,
+    pre_analyze_video,
+    analyze_video_with_preanalysis,
+    suggest_music_style
+)
 
 logger = logging.getLogger("scoreflow.projects")
 
@@ -29,6 +36,186 @@ async def get_project(project_id: str):
     return result.data[0]
 
 
+class PreAnalyzeRequest(BaseModel):
+    vibe: Optional[str] = None
+
+
+@router.post("/projects/{project_id}/pre-analyze")
+async def start_pre_analysis(
+    project_id: str,
+    background_tasks: BackgroundTasks,
+    request: PreAnalyzeRequest = None
+):
+    """
+    Start pre-analysis for a project.
+
+    Enhanced pre-analysis includes:
+    - Frame extraction
+    - Audio transcription
+    - Scene detection (internal cuts)
+    - Auto-boundary detection (section suggestions)
+    - Video structure detection
+    - Music style recommendation (if vibe is provided)
+
+    This runs while the user fills out the simplified brief.
+    Fire-and-forget: returns immediately with status "started".
+
+    Args:
+        vibe: Optional user-selected vibe for music style recommendation
+    """
+    vibe = request.vibe if request else None
+    logger.info(f"[PRE-ANALYSIS] ========== Starting pre-analysis for project {project_id[:8]}, vibe={vibe or '(none)'} ==========")
+
+    # Get clips for this project
+    clips_result = supabase.table("clips").select("*").eq(
+        "project_id", project_id
+    ).order("clip_order").execute()
+
+    clips = clips_result.data
+
+    if not clips:
+        logger.warning(f"[PRE-ANALYSIS] No clips found for project {project_id[:8]}")
+        return {"status": "skipped", "message": "No clips to analyze"}
+
+    # Check if pre-analysis already started or completed
+    project_result = supabase.table("projects").select(
+        "pre_analysis_status, detected_video_structure, detected_theme_summary, recommended_music_style"
+    ).eq("id", project_id).execute()
+
+    if project_result.data:
+        status = project_result.data[0].get("pre_analysis_status")
+        if status == "COMPLETE":
+            # If already complete, return the results
+            logger.info(f"[PRE-ANALYSIS] Already COMPLETE for project {project_id[:8]}")
+            return {
+                "status": "complete",
+                "video_structure": project_result.data[0].get("detected_video_structure"),
+                "theme_summary": project_result.data[0].get("detected_theme_summary"),
+                "recommended_music_style": project_result.data[0].get("recommended_music_style"),
+            }
+        elif status == "ANALYZING":
+            logger.info(f"[PRE-ANALYSIS] Already ANALYZING for project {project_id[:8]}")
+            return {"status": "analyzing"}
+
+    # Queue background task
+    background_tasks.add_task(
+        _background_pre_analyze,
+        clips=clips,
+        project_id=project_id,
+        vibe=vibe
+    )
+
+    return {"status": "started"}
+
+
+@router.get("/projects/{project_id}/pre-analysis-status")
+async def get_pre_analysis_status(project_id: str):
+    """
+    Get the current pre-analysis status and results for a project.
+
+    Returns status and results if complete (video_structure, theme, music recommendation).
+    """
+    result = supabase.table("projects").select(
+        "pre_analysis_status, selected_vibe, detected_video_structure, "
+        "detected_theme_summary, recommended_music_style, pre_analysis_auto_boundaries"
+    ).eq("id", project_id).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = result.data[0]
+    status = project.get("pre_analysis_status", "PENDING")
+
+    response = {
+        "status": status.lower() if status else "pending",
+        "vibe": project.get("selected_vibe"),
+    }
+
+    if status == "COMPLETE":
+        response.update({
+            "video_structure": project.get("detected_video_structure"),
+            "theme_summary": project.get("detected_theme_summary"),
+            "recommended_music_style": project.get("recommended_music_style"),
+            "auto_boundaries": project.get("pre_analysis_auto_boundaries"),
+        })
+
+    return response
+
+
+class UpdateVibeRequest(BaseModel):
+    vibe: str
+
+
+@router.post("/projects/{project_id}/vibe")
+async def set_project_vibe(project_id: str, request: UpdateVibeRequest):
+    """
+    Set the user's selected vibe and get/update music style recommendation.
+
+    This can be called after pre-analysis to get the recommended music style,
+    or to update the vibe selection.
+    """
+    vibe = request.vibe
+    logger.info(f"[VIBE] Setting vibe for project {project_id[:8]}: {vibe}")
+
+    # Get current project data
+    result = supabase.table("projects").select(
+        "detected_video_structure, detected_theme_summary"
+    ).eq("id", project_id).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = result.data[0]
+    video_structure = project.get("detected_video_structure", "Mixed")
+    theme_summary = project.get("detected_theme_summary")
+
+    # Generate music style recommendation
+    recommended_style = suggest_music_style(vibe, video_structure, theme_summary)
+
+    # Update project
+    supabase.table("projects").update({
+        "selected_vibe": vibe,
+        "recommended_music_style": recommended_style,
+    }).eq("id", project_id).execute()
+
+    return {
+        "vibe": vibe,
+        "video_structure": video_structure,
+        "theme_summary": theme_summary,
+        "recommended_music_style": recommended_style,
+    }
+
+
+class ConfirmStyleRequest(BaseModel):
+    music_style: str
+
+
+@router.post("/projects/{project_id}/confirm-style")
+async def confirm_music_style(project_id: str, request: ConfirmStyleRequest):
+    """
+    Confirm the music style to use as the "gold standard" for all sections.
+
+    This is the style that will be used as the default for all sections,
+    with only dramatic deviations allowed.
+    """
+    music_style = request.music_style
+    logger.info(f"[STYLE] Confirming music style for project {project_id[:8]}: {music_style}")
+
+    supabase.table("projects").update({
+        "confirmed_music_style": music_style,
+    }).eq("id", project_id).execute()
+
+    return {"confirmed_music_style": music_style}
+
+
+async def _background_pre_analyze(clips: list, project_id: str, vibe: str = None):
+    """Background task to run pre-analysis."""
+    try:
+        await pre_analyze_video(clips, project_id, vibe)
+    except Exception as e:
+        logger.error(f"[PRE-ANALYSIS] Background task failed: {e}")
+
+
 @router.post("/projects/{project_id}/brief")
 async def submit_brief(project_id: str, brief: CreativeBrief):
     """Submit creative brief and trigger analysis pipeline (PRD Section 8)."""
@@ -44,6 +231,19 @@ async def submit_brief(project_id: str, brief: CreativeBrief):
         "references_text": brief.references_text or "",
     }).eq("id", project_id).execute()
     logger.info(f"[BRIEF] Project brief data updated")
+
+    # Get project to check pre-analysis status and gold standard style
+    project_result = supabase.table("projects").select("*").eq("id", project_id).execute()
+    project_data = project_result.data[0] if project_result.data else {}
+    pre_analysis_status = project_data.get("pre_analysis_status")
+    confirmed_style = project_data.get("confirmed_music_style")
+    recommended_style = project_data.get("recommended_music_style")
+
+    # Use confirmed style, or fall back to recommended, or brief.music_style_direction
+    gold_standard_style = confirmed_style or recommended_style or brief.music_style_direction
+
+    logger.info(f"[BRIEF] Pre-analysis status: {pre_analysis_status}")
+    logger.info(f"[BRIEF] Gold standard music style: {gold_standard_style}")
 
     # Get clips for this project
     logger.info(f"[BRIEF] Querying clips for project {project_id[:8]}...")
@@ -79,7 +279,36 @@ async def submit_brief(project_id: str, brief: CreativeBrief):
         "references_text": brief.references_text or "",
     }
 
-    analysis_result = await analyze_video(clips, brief_dict, project_id)
+    # Check if pre-analysis is complete - use cached data for faster processing
+    if pre_analysis_status == "COMPLETE":
+        logger.info("[BRIEF] Using pre-analysis data (faster path)")
+
+        # Recalculate density windows from scene changes if available
+        scene_changes = project_data.get("pre_analysis_scene_changes", [])
+        if scene_changes:
+            from services.analysis_service import calculate_density_windows
+            density_windows = calculate_density_windows(scene_changes, total_duration)
+            logger.info(f"[BRIEF] Recalculated {len(density_windows)} density windows from {len(scene_changes)} scene changes")
+        else:
+            density_windows = []
+
+        pre_analysis = {
+            "frames": project_data.get("pre_analysis_frames", []),
+            "transcript": project_data.get("pre_analysis_transcript", ""),
+            "cut_density": project_data.get("pre_analysis_cut_density", []),
+            "auto_boundaries": project_data.get("pre_analysis_auto_boundaries", []),
+            "density_windows": density_windows,
+            "video_structure": project_data.get("detected_video_structure"),
+            "scene_changes": project_data.get("pre_analysis_scene_changes", []),
+        }
+        analysis_result = await analyze_video_with_preanalysis(
+            clips, brief_dict, project_id, pre_analysis, gold_standard_style
+        )
+    else:
+        # Full pipeline (fallback)
+        logger.info("[BRIEF] Running full analysis pipeline (pre-analysis not available)")
+        analysis_result = await analyze_video(clips, brief_dict, project_id)
+
     logger.info(f"[BRIEF] Analysis complete: {len(analysis_result.sections)} sections, mode={analysis_result.analysis_mode}")
 
     # Store sections in database

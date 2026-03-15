@@ -8,7 +8,22 @@ create table if not exists projects (
   total_duration float default 0,
   overall_energy text,
   music_style_direction text,
-  references_text text
+  references_text text,
+  -- Pre-analysis columns (Feature 2: run frame extraction, transcription, cut density before brief)
+  pre_analysis_status text default 'PENDING',
+  pre_analysis_frames jsonb,
+  pre_analysis_transcript text,
+  pre_analysis_cut_density jsonb,
+  -- Auto section detection columns (scene detection, auto-boundaries)
+  pre_analysis_scene_changes jsonb,
+  pre_analysis_auto_boundaries jsonb,
+  -- Video structure and theme detection
+  detected_video_structure text,
+  detected_theme_summary text,
+  -- Music style recommendation (gold standard)
+  selected_vibe text,
+  recommended_music_style text,
+  confirmed_music_style text
 );
 
 -- clips
@@ -43,7 +58,9 @@ create table if not exists sections (
   suggested_music_style text,
   music_status text default 'PENDING',
   feedback_history jsonb default '[]',
-  section_order int
+  section_order int,
+  -- Analysis status for on-demand re-analysis (Feature 3)
+  analysis_status text default 'COMPLETE'
 );
 
 -- tracks
