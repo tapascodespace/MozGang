@@ -111,7 +111,7 @@ Located in `backend/services/analysis_types.py`:
 ```python
 SECTION_TYPES = ["Hook","Intro","Setup","Build","Anticipation","Reveal",
                  "Reaction","Demonstration","Montage","Transition","Recap",
-                 "Climax","Cooldown","Testimonial","CTA","Outro"]
+                 "Climax","Cooldown","Testimonial","CTA","Outro","Scenic"]
 
 SCENE_TYPES = ["Talking Head","Walk and Talk","Travel Montage","Product Showcase",
                "Tutorial","Action Moment","Crowd/Event","Reaction Shot",...]
@@ -234,14 +234,38 @@ Run `migrations/001_workspace_enhancements.sql` to add new columns for existing 
 ## Auto Section Detection Feature
 
 ### Overview
-Automatically detects scene changes WITHIN clips (not just at clip boundaries) and intelligently groups them into narrative sections based on pacing changes.
+Automatically detects scene changes WITHIN clips (not just at clip boundaries) and intelligently groups them into narrative sections based on pacing changes and visual content analysis.
 
 ### Scene Detection Algorithm
 1. **FFmpeg Scene Detection**: `ffmpeg -filter:v "select='gt(scene,0.3)'"` detects visual scene changes
 2. **Merge Cut Sources**: Combines clip boundaries + internal scene changes
 3. **Rolling Density Calculation**: 5-second windows categorized as MONTAGE/MEDIUM/SLOW/STATIC
-4. **Boundary Detection**: Section boundaries occur where pacing CHANGES, not at every cut
-5. **Guardrails**: Min 10s sections, max 4 boundaries (5 sections), skip videos <30s
+4. **Video Structure Detection**: Classifies video type using shot patterns, transcript density, and pacing
+5. **Boundary Detection**: Section boundaries occur where pacing CHANGES (montage/mixed) or where visual content changes (scenic)
+6. **Scenic Content Detection**: For scenic/travel/cinematic videos with uniform pacing, uses content-based boundaries instead of pacing-based
+7. **Guardrails**: Min 10s sections, max 4 boundaries (5 sections), skip videos <30s
+
+### Video Structure Detection
+`detect_video_structure_fast()` classifies videos using three signals:
+
+1. **Shot patterns** (strongest signal): Many short shots (>=5 cuts, avg <5s) + non-montage pacing → **"Scenic"**
+2. **Transcript keywords**: "tutorial", "travel", "interview", etc. → matching type
+3. **Pacing fallback**: MONTAGE → "Montage", SLOW/STATIC + low transcript density (<15 chars/s) → "Scenic", STATIC + speech → "Talking Head"
+
+**Important**: "Vlog" is the default fallback type. It is NOT treated as talking head — only "Talking Head", "Interview", and "Tutorial" use the conservative transcript-based sectioning path.
+
+### Scenic Video Handling
+Scenic videos (travel, nature, cinematic) have uniform pacing but visually distinct shots.
+The pacing-based boundary detection fails for these, so special handling is used:
+
+1. **Detection**: `detect_video_structure_fast()` identifies scenic content using shot patterns (many short shots + slow pacing) or low transcript density at slow pacing
+2. **Per-Shot Frames**: `_extract_per_shot_frames()` extracts one representative frame per shot segment (between cuts), replacing evenly-spaced frames
+3. **Cut-Based Boundaries**: `find_auto_boundaries()` distributes boundaries evenly across cuts, snapping to nearest cut point
+4. **GPT-4o Prompt**: Enhanced to instruct grouping visually similar shots and splitting at location/subject changes
+5. **Scene Change Context**: All cut timestamps are passed to GPT-4o so it knows where shots change
+6. **More Frames**: Frame limit increased from 8 to 14 for scenic content to cover more shots
+
+**Config**: `SCENIC_VIDEO_TYPES = ("Scenic", "Travel", "Cinematic")` in config.py
 
 ### Density Categories (config.py)
 ```python
@@ -283,17 +307,17 @@ POST   /projects/{id}/confirm-style        Confirm gold standard music style
 `pre_analyze_video()` now includes:
 - Frame extraction
 - Audio transcription
-- Scene detection (FFmpeg) - NEW
-- Auto-boundary detection - NEW
-- Video structure detection (GPT-4o) - NEW
-- Theme summary - NEW
-- Music style recommendation - NEW
+- Scene detection (FFmpeg)
+- Auto-boundary detection
+- Video structure detection (heuristic, no GPT-4o)
+- Theme summary
+- Music style recommendation
 
 ### Database Columns (projects table)
 ```sql
 pre_analysis_scene_changes jsonb      -- Detected scene change timestamps
 pre_analysis_auto_boundaries jsonb    -- Suggested section break points
-detected_video_structure text         -- "Vlog", "Tutorial", "Interview", etc.
+detected_video_structure text         -- "Scenic", "Vlog", "Tutorial", etc.
 detected_theme_summary text           -- AI-detected theme description
 selected_vibe text                    -- User's selected vibe
 recommended_music_style text          -- AI recommendation based on vibe + structure
@@ -302,3 +326,28 @@ confirmed_music_style text            -- "Gold standard" confirmed by user
 
 ### Migration
 Run `migrations/002_auto_section_detection.sql` to add new columns.
+
+---
+
+## Seamless Clip Playback
+
+### Problem
+When playing through the timeline, transitioning between uploaded clips caused a ~500ms stutter because a single `<video>` element was switching `src` (requiring network fetch + decoder init).
+
+### Solution: Dual Video Element Preloading
+Component: `frontend/src/components/PreviewPlayer.jsx`
+
+**Architecture:**
+- Two `<video>` elements (A and B) stacked on top of each other via `position: absolute`
+- Only the active element has `opacity: 1`; the other is hidden
+- While clip N plays on element A, clip N+1 is preloaded on element B (`src` + `load()`)
+- When clip N ends (`handleEnded`), elements swap: B becomes visible and plays instantly, A becomes the preloader
+- All existing code uses `videoRef.current` which is kept in sync with the active element
+
+**Key details:**
+- `activeSlotRef` (ref) tracks which element is active (synchronous, no render delay)
+- `displaySlot` (state) triggers re-render for visual swap
+- `preloadedClipIdx` (ref) tracks which clip is buffered on the inactive element
+- Event handlers (`handleTimeUpdate`, `handleEnded`) check `e.target` against active element to ignore events from the preload element
+- `handleLoadedMetadata` correctly stores clip duration for both active and preloaded clips
+- Falls back to src-switch on seeks to non-preloaded clips (rare)

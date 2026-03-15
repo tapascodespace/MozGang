@@ -19,6 +19,19 @@ const styles = {
     width: '100%',
     height: '100%',
     objectFit: 'contain',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+  },
+  videoHidden: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    opacity: 0,
+    pointerEvents: 'none',
   },
   controls: {
     position: 'absolute',
@@ -30,6 +43,7 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: 12,
+    zIndex: 2,
   },
   playBtn: {
     background: 'rgba(255,255,255,0.15)',
@@ -78,7 +92,15 @@ function formatTime(seconds) {
 }
 
 export default function PreviewPlayer({ clips, sections = [], tracks = [], currentTime, onTimeUpdate, onPlayStateChange }) {
+  // ── Dual video element refs for seamless clip transitions ──
+  const videoARef = useRef(null);
+  const videoBRef = useRef(null);
+  const activeSlotRef = useRef(0); // 0 = A is active, 1 = B is active
+  const [displaySlot, setDisplaySlot] = useState(0); // triggers re-render for visibility
+  // Logical videoRef that always points to the active element
   const videoRef = useRef(null);
+  const preloadedClipIdx = useRef(-1); // which clip index is preloaded on the inactive element
+
   const audioRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [clipUrls, setClipUrls] = useState([]);
@@ -86,25 +108,29 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
   const [localTime, setLocalTime] = useState(0);
   const [clipActualDurations, setClipActualDurations] = useState([]);
   const [currentTrackUrl, setCurrentTrackUrl] = useState(null);
-  // Use a timestamp-based guard instead of a simple boolean so we can
-  // ignore onTimeUpdate events that arrive shortly after a seek.
   const seekingUntil = useRef(0);
   const lastPropSeek = useRef(0);
   const pendingSeekRef = useRef(null);
   const pendingPlayRef = useRef(false);
-  // Ref to track currentClipIndex synchronously (avoids stale closure issues)
   const currentClipIndexRef = useRef(0);
 
   const log = useCallback((msg, data = {}) => {
     if (typeof window === 'undefined') return;
-    // Keep logs lightweight and easy to grep in console.
     console.debug('[PreviewPlayer]', msg, data);
+  }, []);
+
+  // Helper: get preload video element (the one NOT currently active)
+  const getPreloadVideo = useCallback(() => {
+    return activeSlotRef.current === 0 ? videoBRef.current : videoARef.current;
+  }, []);
+
+  // Sync videoRef.current to whichever physical element is active
+  const syncVideoRef = useCallback(() => {
+    videoRef.current = activeSlotRef.current === 0 ? videoARef.current : videoBRef.current;
   }, []);
 
   const derivedClips = useMemo(() => {
     if (!clips || clips.length === 0) return [];
-    // Always use sequential positioning based on duration to match Timeline
-    // This ignores any backend start_time/end_time which may be incorrect
     let cursor = 0;
     return clips.map((clip) => {
       const duration = Number.isFinite(clip.duration) ? clip.duration : 0;
@@ -125,7 +151,6 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
     return derivedClips[derivedClips.length - 1].__end || 0;
   }, [derivedClips]);
 
-  // Keep ref in sync with state (for use in callbacks that may have stale closures)
   useEffect(() => {
     currentClipIndexRef.current = currentClipIndex;
   }, [currentClipIndex]);
@@ -142,12 +167,35 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
     setClipUrls(urls);
   }, [clips]);
 
-  // Load first clip
+  // Initialize: set videoRef to element A and load first clip
+  useEffect(() => {
+    if (videoARef.current) {
+      videoRef.current = videoARef.current;
+      activeSlotRef.current = 0;
+    }
+  }, []);
+
   useEffect(() => {
     if (clipUrls.length > 0 && videoRef.current && !videoRef.current.src) {
       videoRef.current.src = clipUrls[0];
     }
   }, [clipUrls]);
+
+  // ── Preload next clip on the inactive video element ──
+  useEffect(() => {
+    const nextIdx = currentClipIndex + 1;
+    if (nextIdx < clipUrls.length) {
+      const preloadEl = getPreloadVideo();
+      if (preloadEl) {
+        preloadEl.src = clipUrls[nextIdx];
+        preloadEl.load();
+        preloadedClipIdx.current = nextIdx;
+        log('preload-next', { nextIdx, url: clipUrls[nextIdx]?.slice(-30) });
+      }
+    } else {
+      preloadedClipIdx.current = -1;
+    }
+  }, [currentClipIndex, clipUrls, getPreloadVideo, log]);
 
   // Find and sync track audio based on current time
   useEffect(() => {
@@ -156,7 +204,6 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
       return;
     }
 
-    // Find which section contains the current time
     const currentSection = sections.find(
       (s) => localTime >= s.start_time && localTime < s.end_time
     );
@@ -166,7 +213,6 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
       return;
     }
 
-    // Find the non-discarded track for this section
     const track = tracks.find(
       (t) => t.section_id === currentSection.id && !t.is_discarded && t.stream_url
     );
@@ -191,7 +237,6 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
       audioRef.current.load();
     }
 
-    // Find section for timing offset
     const currentSection = sections.find(
       (s) => localTime >= s.start_time && localTime < s.end_time
     );
@@ -199,7 +244,6 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
     if (currentSection && audioRef.current.readyState >= 1) {
       const offsetInSection = localTime - currentSection.start_time;
       const audioDelta = Math.abs(audioRef.current.currentTime - offsetInSection);
-      // Only seek if significantly out of sync
       if (audioDelta > 0.3) {
         audioRef.current.currentTime = offsetInSection;
       }
@@ -215,10 +259,7 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
   // React to external currentTime prop changes (from Timeline clicks)
   useEffect(() => {
     if (!clips || clips.length === 0 || !clipUrls.length) return;
-    // Only react if the prop differs significantly from our local time
-    // (avoids infinite loop since we also call onTimeUpdate)
     if (Math.abs(currentTime - localTime) < 0.3) return;
-    // Avoid re-seeking for the same prop value
     if (Math.abs(currentTime - lastPropSeek.current) < 0.1) return;
     lastPropSeek.current = currentTime;
     performSeek(currentTime);
@@ -241,11 +282,9 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
     if (!derivedClips || derivedClips.length === 0 || totalDuration <= 0) return;
     const safeSeekTime = Math.max(0, Math.min(seekTime, totalDuration));
 
-    // Block onTimeUpdate for 500ms to let the video settle
     seekingUntil.current = Date.now() + 500;
     setLocalTime(safeSeekTime);
 
-    // Find the correct clip for this time
     let targetIdx = 0;
     for (let i = 0; i < derivedClips.length; i++) {
       if (safeSeekTime >= derivedClips[i].__start && safeSeekTime < derivedClips[i].__end) {
@@ -283,27 +322,51 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
     };
 
     if (targetIdx !== currentClipIndex) {
-      // Update ref BEFORE loading new video (so onLoadedMetadata has correct index)
       currentClipIndexRef.current = targetIdx;
       setCurrentClipIndex(targetIdx);
-      if (videoRef.current && clipUrls[targetIdx]) {
-        const wasPlaying = isPlaying;
-        videoRef.current.src = clipUrls[targetIdx];
-        videoRef.current.onloadedmetadata = () => {
-          if (!videoRef.current) return;
+
+      // Check if the target clip is already preloaded on the inactive element
+      if (preloadedClipIdx.current === targetIdx) {
+        // Swap to the preloaded element — instant transition
+        const preloadEl = getPreloadVideo();
+        const oldActive = videoRef.current;
+
+        if (oldActive) oldActive.pause();
+
+        // Swap active slot
+        activeSlotRef.current = activeSlotRef.current === 0 ? 1 : 0;
+        syncVideoRef();
+        setDisplaySlot(activeSlotRef.current);
+
+        if (videoRef.current) {
           videoRef.current.currentTime = offsetInClip;
-          logRanges('ranges-after-metadata');
-          if (pendingSeekRef.current?.targetIdx === targetIdx) {
-            pendingSeekRef.current = null;
-          }
-          log('seek-applied (metadata)', { targetIdx, offsetInClip, safeSeekTime });
-          if (wasPlaying) {
+          if (isPlaying) {
             videoRef.current.play().catch(() => {});
           }
-          // Extend the guard a bit more after metadata loads
-          seekingUntil.current = Date.now() + 300;
-        };
-        log('seek-queued (new clip)', { targetIdx, offsetInClip, safeSeekTime });
+        }
+        preloadedClipIdx.current = -1;
+        seekingUntil.current = Date.now() + 150;
+        log('seek-swap (preloaded)', { targetIdx, offsetInClip });
+      } else {
+        // Target clip not preloaded — fall back to src switch on active element
+        if (videoRef.current && clipUrls[targetIdx]) {
+          const wasPlaying = isPlaying;
+          videoRef.current.src = clipUrls[targetIdx];
+          videoRef.current.onloadedmetadata = () => {
+            if (!videoRef.current) return;
+            videoRef.current.currentTime = offsetInClip;
+            logRanges('ranges-after-metadata');
+            if (pendingSeekRef.current?.targetIdx === targetIdx) {
+              pendingSeekRef.current = null;
+            }
+            log('seek-applied (metadata)', { targetIdx, offsetInClip, safeSeekTime });
+            if (wasPlaying) {
+              videoRef.current.play().catch(() => {});
+            }
+            seekingUntil.current = Date.now() + 200;
+          };
+          log('seek-queued (new clip, not preloaded)', { targetIdx, offsetInClip, safeSeekTime });
+        }
       }
     } else {
       if (videoRef.current && canSeekNow) {
@@ -316,18 +379,19 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
     }
   }
 
-  const handleTimeUpdate = useCallback(() => {
-    if (!videoRef.current || !derivedClips[currentClipIndex]) return;
-    // Ignore updates while seeking or during clip transitions
+  const handleTimeUpdate = useCallback((e) => {
+    // Only process events from the active video element
+    const activeVideo = activeSlotRef.current === 0 ? videoARef.current : videoBRef.current;
+    if (e.target !== activeVideo) return;
+    if (!activeVideo || !derivedClips[currentClipIndex]) return;
     if (Date.now() < seekingUntil.current) return;
 
     const clip = derivedClips[currentClipIndex];
     const clipStart = clip.__start;
     const nominalDuration = clip.__duration || 0;
     const actualDuration = clipActualDurations[currentClipIndex];
-    const videoTime = videoRef.current.currentTime;
+    const videoTime = activeVideo.currentTime;
 
-    // Scale video time back to nominal timeline time (inverse of seek scaling)
     const scale =
       Number.isFinite(actualDuration) && actualDuration > 0 && nominalDuration > 0
         ? nominalDuration / actualDuration
@@ -340,27 +404,77 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
     onTimeUpdate?.(absoluteTime);
   }, [derivedClips, currentClipIndex, clipActualDurations, onTimeUpdate]);
 
-  const handleEnded = useCallback(() => {
+  const handleEnded = useCallback((e) => {
+    // Only process events from the active video element
+    const activeVideo = activeSlotRef.current === 0 ? videoARef.current : videoBRef.current;
+    if (e.target !== activeVideo) return;
+
     const nextIdx = currentClipIndex + 1;
     if (nextIdx < clipUrls.length && derivedClips[nextIdx]) {
-      // Block time updates during clip transition
-      seekingUntil.current = Date.now() + 500;
-      // Update ref BEFORE loading new video (so onLoadedMetadata has correct index)
       currentClipIndexRef.current = nextIdx;
-      // Set local time to the start of the next clip immediately
       setLocalTime(derivedClips[nextIdx].__start);
       setCurrentClipIndex(nextIdx);
-      if (videoRef.current) {
-        videoRef.current.src = clipUrls[nextIdx];
-        videoRef.current.play().catch(() => {});
+
+      // Check if next clip is preloaded on the inactive element
+      if (preloadedClipIdx.current === nextIdx) {
+        // Seamless swap — the preloaded element already has data buffered
+        const oldActive = activeVideo;
+        oldActive.pause();
+
+        activeSlotRef.current = activeSlotRef.current === 0 ? 1 : 0;
+        syncVideoRef();
+        setDisplaySlot(activeSlotRef.current);
+
+        if (videoRef.current) {
+          videoRef.current.currentTime = 0;
+          videoRef.current.play().catch(() => {});
+        }
+        preloadedClipIdx.current = -1;
+        seekingUntil.current = Date.now() + 100;
+        log('clip-swap (seamless)', { nextIdx });
+      } else {
+        // Fallback: src switch on active element (shouldn't happen normally)
+        seekingUntil.current = Date.now() + 300;
+        if (videoRef.current) {
+          videoRef.current.src = clipUrls[nextIdx];
+          videoRef.current.play().catch(() => {});
+        }
+        log('clip-switch (fallback)', { nextIdx });
       }
-      // Audio will auto-update via the useEffect that watches localTime
     } else {
       setIsPlaying(false);
       if (audioRef.current) audioRef.current.pause();
       onPlayStateChange?.(false);
     }
-  }, [currentClipIndex, clipUrls, derivedClips, onPlayStateChange]);
+  }, [currentClipIndex, clipUrls, derivedClips, onPlayStateChange, syncVideoRef, getPreloadVideo, log]);
+
+  const handleLoadedMetadata = useCallback((e) => {
+    const target = e.target;
+    const activeVideo = activeSlotRef.current === 0 ? videoARef.current : videoBRef.current;
+    const duration = target.duration;
+
+    if (target === activeVideo) {
+      // Active element loaded metadata — store for current clip
+      const idx = currentClipIndexRef.current;
+      setClipActualDurations((prev) => {
+        const next = [...prev];
+        next[idx] = duration;
+        return next;
+      });
+      log('loadedmetadata (active)', { duration, clipIndex: idx });
+    } else {
+      // Preload element loaded metadata — store for preloaded clip
+      const idx = preloadedClipIdx.current;
+      if (idx >= 0) {
+        setClipActualDurations((prev) => {
+          const next = [...prev];
+          next[idx] = duration;
+          return next;
+        });
+        log('loadedmetadata (preload)', { duration, clipIndex: idx });
+      }
+    }
+  }, [log]);
 
   const togglePlay = useCallback(() => {
     if (!videoRef.current || clipUrls.length === 0) return;
@@ -390,6 +504,31 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
     }
   }, [isPlaying, clipUrls, onPlayStateChange, currentTrackUrl]);
 
+  const handleSeeked = useCallback((e) => {
+    // Only process events from the active video element
+    const activeVideo = activeSlotRef.current === 0 ? videoARef.current : videoBRef.current;
+    if (e.target !== activeVideo) return;
+    if (!activeVideo) return;
+
+    const pending = pendingSeekRef.current;
+    log('onseeked', { currentTime: activeVideo.currentTime, pending });
+    if (pending) {
+      const delta = Math.abs(activeVideo.currentTime - pending.offsetInClip);
+      if (delta <= 0.5) {
+        pendingSeekRef.current = null;
+        log('seek-confirmed', { delta });
+      } else {
+        log('seek-mismatch', { delta, desired: pending.offsetInClip });
+      }
+    }
+    if (pendingPlayRef.current) {
+      pendingPlayRef.current = false;
+      activeVideo.play().catch(() => {});
+      setIsPlaying(true);
+      onPlayStateChange?.(true);
+    }
+  }, [onPlayStateChange, log]);
+
   const handleScrub = useCallback((e) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -412,51 +551,26 @@ export default function PreviewPlayer({ clips, sections = [], tracks = [], curre
     <div style={styles.container}>
       <audio ref={audioRef} style={{ display: 'none' }} />
       <video
-        ref={videoRef}
-        style={styles.video}
-        onLoadedMetadata={() => {
-          if (!videoRef.current) return;
-          const duration = videoRef.current.duration;
-          // Use ref to get current index (avoids stale closure issue during clip transitions)
-          const idx = currentClipIndexRef.current;
-          setClipActualDurations((prev) => {
-            const next = [...prev];
-            next[idx] = duration;
-            return next;
-          });
-          log('loadedmetadata', {
-            duration,
-            currentTime: videoRef.current.currentTime,
-            clipIndex: idx,
-          });
-        }}
-        onPlay={() => {
-          if (!videoRef.current) return;
-          log('onplay', { currentTime: videoRef.current.currentTime });
-        }}
-        onSeeked={() => {
-          if (!videoRef.current) return;
-          const pending = pendingSeekRef.current;
-          log('onseeked', { currentTime: videoRef.current.currentTime, pending });
-          if (pending) {
-            const delta = Math.abs(videoRef.current.currentTime - pending.offsetInClip);
-            if (delta <= 0.5) {
-              pendingSeekRef.current = null;
-              log('seek-confirmed', { delta });
-            } else {
-              log('seek-mismatch', { delta, desired: pending.offsetInClip });
-            }
-          }
-          if (pendingPlayRef.current) {
-            pendingPlayRef.current = false;
-            videoRef.current.play().catch(() => {});
-            setIsPlaying(true);
-            onPlayStateChange?.(true);
-          }
-        }}
+        ref={videoARef}
+        style={displaySlot === 0 ? styles.video : styles.videoHidden}
+        onLoadedMetadata={handleLoadedMetadata}
+        onPlay={() => log('onplay-A', { currentTime: videoARef.current?.currentTime })}
+        onSeeked={handleSeeked}
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
         playsInline
+        preload="auto"
+      />
+      <video
+        ref={videoBRef}
+        style={displaySlot === 1 ? styles.video : styles.videoHidden}
+        onLoadedMetadata={handleLoadedMetadata}
+        onPlay={() => log('onplay-B', { currentTime: videoBRef.current?.currentTime })}
+        onSeeked={handleSeeked}
+        onTimeUpdate={handleTimeUpdate}
+        onEnded={handleEnded}
+        playsInline
+        preload="auto"
       />
       <div style={styles.controls}>
         <button style={styles.playBtn} onClick={togglePlay}>

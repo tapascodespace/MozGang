@@ -257,6 +257,7 @@ const styles = {
     justifyContent: 'center',
     background: '#0b0c10',
     fontFamily: "'DM Sans', sans-serif",
+    overflowY: 'auto',
   },
   container: {
     width: '100%',
@@ -316,6 +317,8 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: 8,
+    maxHeight: 240,
+    overflowY: 'auto',
   },
   fileItem: {
     display: 'flex',
