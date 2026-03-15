@@ -3,7 +3,19 @@
     "allow": [
       "Bash(npm create vite@latest . -- --template react)",
       "Bash(npm install @supabase/supabase-js axios react-dropzone react-hot-toast)",
-      "Bash(gh auth status)"
+      "Bash(gh auth status)",
+      "Bash(git pull origin main)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(pip install aiohttp==3.9.3 -q)",
+      "Bash(lsof -ti:8000)",
+      "Bash(xargs kill -9)",
+      "Bash(lsof -ti:5173)",
+      "Bash(uvicorn main:app --reload --port 8000)",
+      "Bash(npm run dev)",
+      "Bash(git push origin main)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npm run build)"
     ]
   }
 }

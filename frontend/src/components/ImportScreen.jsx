@@ -203,12 +203,12 @@ export default function ImportScreen({ onComplete }) {
       >
         {/* Title */}
         <motion.h1 style={styles.title} variants={fadeSlideUp}>
-          ScoreFlow
+          amadeus
         </motion.h1>
 
         {/* Subtitle */}
         <motion.p style={styles.subtitle} variants={fadeSlideUp}>
-          AI-powered music scoring for your video
+          Import your video clips to get started
         </motion.p>
 
         {/* Drop zone */}
@@ -222,19 +222,19 @@ export default function ImportScreen({ onComplete }) {
             {...getRootProps()}
             style={{
               ...styles.dropzone,
-              borderColor: isDragActive ? '#45f5c5' : 'rgba(255,255,255,0.08)',
-              background: isDragActive ? 'rgba(69,245,197,0.06)' : '#13151a',
+              borderColor: isDragActive ? '#b87aff' : 'rgba(255,255,255,0.08)',
+              background: isDragActive ? 'rgba(184,122,255,0.06)' : '#13151a',
             }}
             animate={
               isDragActive
                 ? {
                     boxShadow: [
-                      '0 0 0px rgba(69,245,197,0)',
-                      '0 0 30px rgba(69,245,197,0.25)',
-                      '0 0 0px rgba(69,245,197,0)',
+                      '0 0 0px rgba(184,122,255,0)',
+                      '0 0 30px rgba(184,122,255,0.25)',
+                      '0 0 0px rgba(184,122,255,0)',
                     ],
                   }
-                : { boxShadow: '0 0 0px rgba(69,245,197,0)' }
+                : { boxShadow: '0 0 0px rgba(184,122,255,0)' }
             }
             transition={
               isDragActive
@@ -248,7 +248,7 @@ export default function ImportScreen({ onComplete }) {
                 <Upload
                   size={48}
                   strokeWidth={1.5}
-                  color={isDragActive ? '#45f5c5' : 'rgba(255,255,255,0.4)'}
+                  color={isDragActive ? '#b87aff' : 'rgba(255,255,255,0.4)'}
                 />
               </div>
               <p style={styles.dropText}>
@@ -394,7 +394,7 @@ const styles = {
     width: 500,
     height: 500,
     borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(69,245,197,0.08) 0%, rgba(69,245,197,0) 70%)',
+    background: 'radial-gradient(circle, rgba(184,122,255,0.08) 0%, rgba(184,122,255,0) 70%)',
     top: '-10%',
     left: '-5%',
     pointerEvents: 'none',
@@ -405,7 +405,7 @@ const styles = {
     width: 400,
     height: 400,
     borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(69,100,245,0.06) 0%, rgba(69,100,245,0) 70%)',
+    background: 'radial-gradient(circle, rgba(147,51,234,0.06) 0%, rgba(147,51,234,0) 70%)',
     bottom: '-10%',
     right: '-5%',
     pointerEvents: 'none',
@@ -423,15 +423,15 @@ const styles = {
   },
   title: {
     fontFamily: "'DM Serif Display', serif",
-    fontSize: 40,
+    fontSize: 44,
     fontWeight: 400,
-    color: '#ffffff',
+    color: '#b87aff',
     marginBottom: 8,
-    letterSpacing: '-0.02em',
+    letterSpacing: '-0.03em',
   },
   subtitle: {
     fontSize: 15,
-    color: 'rgba(255,255,255,0.5)',
+    color: 'rgba(255,255,255,0.45)',
     marginBottom: 36,
     fontWeight: 400,
   },
@@ -529,7 +529,7 @@ const styles = {
   },
   progressBar: {
     height: '100%',
-    background: '#45f5c5',
+    background: 'linear-gradient(90deg, #b87aff, #9333ea)',
     borderRadius: 3,
   },
   progressLabel: {
@@ -542,14 +542,15 @@ const styles = {
   uploadBtn: {
     marginTop: 24,
     padding: '14px 36px',
-    background: '#45f5c5',
-    color: '#0b0c10',
+    background: 'linear-gradient(135deg, #b87aff, #9333ea)',
+    color: '#fff',
     fontSize: 15,
     fontWeight: 600,
     borderRadius: 10,
     border: 'none',
     cursor: 'pointer',
     fontFamily: "'DM Sans', sans-serif",
+    boxShadow: '0 0 30px rgba(184,122,255,0.25)',
   },
   urlSection: {
     width: '100%',

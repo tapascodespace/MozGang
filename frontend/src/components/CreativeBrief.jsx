@@ -1,8 +1,99 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, Music } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { submitBrief, updateBrief } from '../services/api';
+
+// --- Animated Equalizer (replaces static Music icon) ---
+function AnimatedEqualizer() {
+  const bars = [
+    { dur: 0.4, heights: [8, 22, 6, 18, 8] },
+    { dur: 0.7, heights: [14, 8, 24, 10, 14] },
+    { dur: 0.5, heights: [6, 20, 8, 22, 6] },
+    { dur: 0.9, heights: [18, 6, 16, 8, 18] },
+    { dur: 0.6, heights: [10, 24, 12, 20, 10] },
+  ];
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 24, marginRight: 12 }}>
+      {bars.map((b, i) => (
+        <motion.div
+          key={i}
+          style={{ width: 4, borderRadius: 2, background: '#b87aff' }}
+          animate={{ height: b.heights }}
+          transition={{ duration: b.dur, repeat: Infinity, ease: 'easeInOut' }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// --- Energy Visual Indicator ---
+function EnergyIndicator({ text }) {
+  const keywords = {
+    low: ['calm', 'chill', 'ambient', 'soft', 'gentle', 'quiet', 'relaxed', 'mellow', 'peaceful'],
+    med: ['moderate', 'steady', 'warm', 'light', 'smooth', 'easy', 'balanced'],
+    rising: ['build', 'rising', 'growing', 'cinematic', 'uplifting', 'emotional', 'inspiring', 'hopeful'],
+    high: ['intense', 'explosive', 'hype', 'aggressive', 'epic', 'powerful', 'energetic', 'fast', 'heavy', 'wild', 'peak'],
+  };
+
+  const t = text.toLowerCase();
+  let level = 0;
+  if (!t.trim()) level = 0;
+  else if (keywords.high.some(k => t.includes(k))) level = 90;
+  else if (keywords.rising.some(k => t.includes(k))) level = 65;
+  else if (keywords.med.some(k => t.includes(k))) level = 40;
+  else if (keywords.low.some(k => t.includes(k))) level = 20;
+  else if (t.trim().length > 3) level = 35; // typed something but no keyword match
+
+  const label = level === 0 ? '' : level <= 25 ? 'Low' : level <= 50 ? 'Medium' : level <= 75 ? 'Rising' : 'High';
+  const glowIntensity = level > 70 ? 0.35 : level > 40 ? 0.15 : 0.05;
+
+  if (level === 0) return null;
+
+  return (
+    <motion.div
+      style={{ marginTop: 8 }}
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      transition={{ duration: 0.3 }}
+    >
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        {/* Track */}
+        <div style={{
+          flex: 1, height: 6, borderRadius: 3,
+          background: 'rgba(255,255,255,0.06)', overflow: 'hidden',
+        }}>
+          <motion.div
+            style={{
+              height: '100%', borderRadius: 3,
+              background: 'linear-gradient(90deg, #9333ea, #b87aff)',
+              boxShadow: `0 0 ${level > 70 ? 12 : 6}px rgba(184,122,255,${glowIntensity})`,
+            }}
+            initial={{ width: '0%' }}
+            animate={{ width: `${level}%` }}
+            transition={{ duration: 0.5, ease: [0.25, 0.4, 0.25, 1] }}
+          />
+        </div>
+        {/* Label */}
+        <motion.span
+          style={{
+            fontSize: 11, fontWeight: 600, minWidth: 44,
+            color: level > 70 ? '#b87aff' : 'rgba(184,122,255,0.6)',
+            fontFamily: "'DM Sans', sans-serif",
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+          }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+        >
+          {label}
+        </motion.span>
+      </div>
+    </motion.div>
+  );
+}
 
 export default function CreativeBrief({
   project,
@@ -62,23 +153,14 @@ export default function CreativeBrief({
     }
   };
 
-  // Stagger children variants
   const containerVariants = {
     hidden: {},
-    visible: {
-      transition: {
-        staggerChildren: 0.1,
-      },
-    },
+    visible: { transition: { staggerChildren: 0.1 } },
   };
 
   const fieldVariants = {
     hidden: { opacity: 0, y: 16 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: { duration: 0.35, ease: 'easeOut' },
-    },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
   };
 
   return (
@@ -92,15 +174,10 @@ export default function CreativeBrief({
         style={styles.modal}
         initial={{ y: 40, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        transition={{
-          type: 'spring',
-          stiffness: 300,
-          damping: 28,
-          mass: 0.9,
-        }}
+        transition={{ type: 'spring', stiffness: 300, damping: 28, mass: 0.9 }}
       >
         <h2 style={styles.heading}>
-          <Music size={24} style={{ marginRight: 10, verticalAlign: 'middle', color: '#45f5c5' }} />
+          <AnimatedEqualizer />
           Creative Brief
         </h2>
         <p style={styles.subtext}>
@@ -142,11 +219,13 @@ export default function CreativeBrief({
                 placeholder='e.g. "Cinematic and uplifting, building to a peak"'
                 style={{
                   ...styles.input,
-                  borderColor: focusedField === 'energy' ? '#45f5c5' : 'rgba(255,255,255,0.08)',
+                  borderColor: focusedField === 'energy' ? '#b87aff' : 'rgba(255,255,255,0.08)',
                 }}
                 disabled={submitting}
               />
             </div>
+            {/* Energy visual indicator */}
+            <EnergyIndicator text={overallEnergy} />
           </motion.div>
 
           {/* Q2 - Music Style */}
@@ -176,7 +255,7 @@ export default function CreativeBrief({
                 placeholder='e.g. "Orchestral with modern electronic elements"'
                 style={{
                   ...styles.input,
-                  borderColor: focusedField === 'style' ? '#45f5c5' : 'rgba(255,255,255,0.08)',
+                  borderColor: focusedField === 'style' ? '#b87aff' : 'rgba(255,255,255,0.08)',
                 }}
                 disabled={submitting}
               />
@@ -210,7 +289,7 @@ export default function CreativeBrief({
                 rows={3}
                 style={{
                   ...styles.textarea,
-                  borderColor: focusedField === 'references' ? '#45f5c5' : 'rgba(255,255,255,0.08)',
+                  borderColor: focusedField === 'references' ? '#b87aff' : 'rgba(255,255,255,0.08)',
                 }}
                 disabled={submitting}
               />
@@ -251,15 +330,8 @@ export default function CreativeBrief({
               {isValid && !submitting && (
                 <motion.div
                   style={styles.shimmer}
-                  animate={{
-                    x: ['-100%', '200%'],
-                  }}
-                  transition={{
-                    duration: 2.5,
-                    repeat: Infinity,
-                    repeatDelay: 1.5,
-                    ease: 'easeInOut',
-                  }}
+                  animate={{ x: ['-100%', '200%'] }}
+                  transition={{ duration: 2.5, repeat: Infinity, repeatDelay: 1.5, ease: 'easeInOut' }}
                 />
               )}
               <span style={{ position: 'relative', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -378,7 +450,7 @@ const styles = {
     inset: -2,
     borderRadius: 12,
     background: 'transparent',
-    boxShadow: '0 0 12px 2px rgba(69,245,197,0.2), 0 0 4px 1px rgba(69,245,197,0.1)',
+    boxShadow: '0 0 12px 2px rgba(184,122,255,0.2), 0 0 4px 1px rgba(184,122,255,0.1)',
     pointerEvents: 'none',
     zIndex: 0,
   },
@@ -390,20 +462,21 @@ const styles = {
     bottom: -2,
     borderRadius: 12,
     background: 'transparent',
-    boxShadow: '0 0 12px 2px rgba(69,245,197,0.2), 0 0 4px 1px rgba(69,245,197,0.1)',
+    boxShadow: '0 0 12px 2px rgba(184,122,255,0.2), 0 0 4px 1px rgba(184,122,255,0.1)',
     pointerEvents: 'none',
     zIndex: 0,
   },
   submitBtn: {
     marginTop: 8,
     padding: '14px 32px',
-    background: '#45f5c5',
-    color: '#0b0c10',
+    background: 'linear-gradient(135deg, #b87aff, #9333ea)',
+    color: '#fff',
     fontSize: 15,
     fontWeight: 600,
     borderRadius: 10,
     border: 'none',
     fontFamily: "'DM Sans', sans-serif",
+    boxShadow: '0 0 24px rgba(184,122,255,0.2)',
   },
   shimmer: {
     position: 'absolute',
@@ -411,7 +484,7 @@ const styles = {
     left: 0,
     width: '50%',
     height: '100%',
-    background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)',
+    background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent)',
     zIndex: 0,
     pointerEvents: 'none',
   },

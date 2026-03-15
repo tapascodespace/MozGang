@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
+import LandingPage from './components/LandingPage';
 import ImportScreen from './components/ImportScreen';
 import CreativeBrief from './components/CreativeBrief';
 import ProgressOverlay from './components/ProgressOverlay';
@@ -12,7 +13,7 @@ import { supabase } from './services/supabase';
 import * as api from './services/api';
 
 export default function App() {
-  const [view, setView] = useState('import'); // import | brief | analyzing | workspace
+  const [view, setView] = useState('landing'); // landing | import | brief | analyzing | workspace
   const [project, setProject] = useState(null);
   const [clips, setClips] = useState([]);
   const [sections, setSections] = useState([]);
@@ -186,7 +187,7 @@ export default function App() {
   }, []);
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: view === 'landing' ? 'auto' : 'hidden' }}>
       <Toaster
         position="top-center"
         toastOptions={{
@@ -198,6 +199,10 @@ export default function App() {
           },
         }}
       />
+
+      {view === 'landing' && (
+        <LandingPage onEnter={() => setView('import')} />
+      )}
 
       {view === 'import' && (
         <ImportScreen onComplete={handleImportComplete} />
