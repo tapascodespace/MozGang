@@ -88,4 +88,8 @@ export const confirmMusicStyle = (projectId, musicStyle) =>
 export const reanalyzeSection = (projectId, sectionId) =>
   api.post(`/projects/${projectId}/sections/${sectionId}/reanalyze`);
 
+// Import clip from YouTube URL
+export const importFromUrl = (projectId, url) =>
+  api.post(`/projects/${projectId}/clips/from-url`, { url }, { timeout: 300000 });
+
 export default api;

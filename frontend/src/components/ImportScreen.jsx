@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import toast from 'react-hot-toast';
-import { createProject, uploadClips, startPreAnalysis, setVibe } from '../services/api';
+import { createProject, uploadClips, startPreAnalysis, setVibe, importFromUrl } from '../services/api';
 
 const ACCEPTED_TYPES = {
   'video/mp4': ['.mp4'],
@@ -21,6 +21,8 @@ export default function ImportScreen({ onComplete }) {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [url, setUrl] = useState('');
+  const [urlLoading, setUrlLoading] = useState(false);
 
   const onDrop = useCallback((acceptedFiles, rejectedFiles) => {
     if (rejectedFiles.length > 0) {
@@ -137,6 +139,40 @@ export default function ImportScreen({ onComplete }) {
     }
   };
 
+  const handleUrlImport = async () => {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      toast.error('Please paste a YouTube URL.');
+      return;
+    }
+
+    setUrlLoading(true);
+    try {
+      toast.loading('Creating project...', { id: 'url-import' });
+      const { data: project } = await createProject();
+      const projectId = project.id;
+
+      toast.loading('Downloading video from YouTube...', { id: 'url-import' });
+      const { data: clip } = await importFromUrl(projectId, trimmed);
+
+      toast.success('Import complete!', { id: 'url-import' });
+
+      startPreAnalysis(projectId).catch((err) => {
+        console.warn('Pre-analysis failed to start:', err);
+      });
+
+      setTimeout(() => {
+        onComplete(project, [clip]);
+      }, 500);
+    } catch (err) {
+      console.error('URL import failed:', err);
+      toast.error(err?.response?.data?.detail || 'Import failed. Please try again.', {
+        id: 'url-import',
+      });
+      setUrlLoading(false);
+    }
+  };
+
   return (
     <div style={styles.wrapper}>
       <div style={styles.container}>
@@ -226,21 +262,34 @@ export default function ImportScreen({ onComplete }) {
           </button>
         )}
 
-        {/* URL paste field (disabled) */}
+        {/* URL import */}
         <div style={styles.urlSection}>
           <div style={styles.dividerRow}>
             <div style={styles.dividerLine} />
             <span style={styles.dividerText}>or</span>
             <div style={styles.dividerLine} />
           </div>
-          <div style={styles.urlFieldWrapper} title="Coming soon">
+          <div style={styles.urlFieldWrapper}>
             <input
               type="text"
-              placeholder="Paste YouTube / TikTok URL"
-              disabled
+              placeholder="Paste YouTube URL"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleUrlImport(); }}
+              disabled={urlLoading || uploading}
               style={styles.urlInput}
             />
-            <span style={styles.comingSoonBadge}>Coming soon</span>
+            <button
+              style={{
+                ...styles.urlImportBtn,
+                opacity: urlLoading || !url.trim() ? 0.5 : 1,
+                cursor: urlLoading || !url.trim() ? 'not-allowed' : 'pointer',
+              }}
+              onClick={handleUrlImport}
+              disabled={urlLoading || !url.trim() || uploading}
+            >
+              {urlLoading ? 'Importing...' : 'Import'}
+            </button>
           </div>
         </div>
       </div>
@@ -432,22 +481,24 @@ const styles = {
     background: 'rgba(255,255,255,0.03)',
     border: '1px solid rgba(255,255,255,0.06)',
     borderRadius: 10,
-    color: 'rgba(255,255,255,0.2)',
+    color: '#fff',
     fontSize: 14,
-    cursor: 'not-allowed',
     fontFamily: "'DM Sans', sans-serif",
+    outline: 'none',
   },
-  comingSoonBadge: {
+  urlImportBtn: {
     position: 'absolute',
-    right: 12,
+    right: 6,
     top: '50%',
     transform: 'translateY(-50%)',
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.35)',
-    background: 'rgba(255,255,255,0.06)',
-    padding: '4px 10px',
-    borderRadius: 6,
-    fontWeight: 500,
-    letterSpacing: '0.02em',
+    fontSize: 13,
+    color: '#0b0c10',
+    background: '#45f5c5',
+    padding: '6px 16px',
+    borderRadius: 7,
+    fontWeight: 600,
+    border: 'none',
+    fontFamily: "'DM Sans', sans-serif",
+    transition: 'opacity 0.2s',
   },
 };

@@ -95,6 +95,11 @@ export const setVibe = (projectId: string, vibe: string) =>
 export const confirmMusicStyle = (projectId: string, musicStyle: string) =>
   api.post(`/projects/${projectId}/confirm-style`, { music_style: musicStyle });
 
+// ── YouTube Import ──
+
+export const importFromUrl = (projectId: string, url: string) =>
+  api.post(`/projects/${projectId}/clips/from-url`, { url }, { timeout: 300000 });
+
 // ── Export ──
 
 export const triggerExport = (projectId: string) =>

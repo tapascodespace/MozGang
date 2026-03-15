@@ -1,8 +1,9 @@
 import { useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Play, Pause, Upload } from "lucide-react";
+import { X, Play, Pause, Upload, Loader2 } from "lucide-react";
 import AmadeusLogo from "@/components/AmadeusLogo";
 import { useClipUpload } from "@/hooks/useClipUpload";
+import * as api from "@/services/api";
 import type { VideoClip } from "@/types";
 
 const ACCEPTED_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
@@ -19,6 +20,8 @@ interface Props {
 export default function UploadDropZone({ onComplete }: Props) {
   const [clips, setClips] = useState<VideoClip[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [url, setUrl] = useState("");
+  const [urlLoading, setUrlLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const { uploadFiles, isUploading } = useClipUpload();
 
@@ -97,6 +100,29 @@ export default function UploadDropZone({ onComplete }: Props) {
     [processFiles, isUploading]
   );
 
+  const handleUrlImport = useCallback(async () => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+
+    setUrlLoading(true);
+    try {
+      const projectRes = await api.createProject();
+      const projectId = projectRes.data.id;
+
+      const clipRes = await api.importFromUrl(projectId, trimmed);
+
+      api.startPreAnalysis(projectId).catch(() => {});
+
+      setTimeout(() => onComplete(projectId, [clipRes.data]), 400);
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        "Import failed. Please try again.";
+      alert(message);
+      setUrlLoading(false);
+    }
+  }, [url, onComplete]);
+
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
@@ -162,17 +188,26 @@ export default function UploadDropZone({ onComplete }: Props) {
           )}
         </div>
 
-        {/* URL input — disabled placeholder */}
+        {/* YouTube URL import */}
         <div className="mt-6 w-full max-w-3xl">
-          <div className="relative group" title="Coming soon">
+          <div className="relative">
             <input
-              disabled
-              placeholder="Paste YouTube / TikTok URL"
-              className="w-full bg-card border border-border rounded-xl px-4 py-3 text-sm text-muted-foreground opacity-50 cursor-not-allowed"
+              type="text"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleUrlImport(); }}
+              disabled={urlLoading || isUploading}
+              placeholder="Paste YouTube URL"
+              className="w-full bg-card border border-border rounded-xl px-4 py-3 pr-24 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary transition-colors"
             />
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-muted-foreground opacity-60">
-              Coming soon
-            </span>
+            <button
+              onClick={handleUrlImport}
+              disabled={urlLoading || !url.trim() || isUploading}
+              className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold transition-opacity disabled:opacity-40 hover:opacity-90 flex items-center gap-1.5"
+            >
+              {urlLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+              {urlLoading ? "Importing…" : "Import"}
+            </button>
           </div>
         </div>
       </div>

@@ -24,6 +24,7 @@ from routes.clips import router as clips_router
 from routes.sections import router as sections_router
 from routes.tracks import router as tracks_router
 from routes.export import router as export_router
+from routes.youtube import router as youtube_router
 
 # Create required directories
 for d in [UPLOAD_DIR, FRAMES_DIR, THUMBNAILS_DIR, AUDIO_DIR, EXPORT_DIR]:
@@ -60,6 +61,7 @@ app.include_router(clips_router, prefix="/api")
 app.include_router(sections_router, prefix="/api")
 app.include_router(tracks_router, prefix="/api")
 app.include_router(export_router, prefix="/api")
+app.include_router(youtube_router, prefix="/api")
 
 
 @app.get("/api/health")
