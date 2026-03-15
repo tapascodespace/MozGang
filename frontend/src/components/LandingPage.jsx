@@ -27,14 +27,14 @@ function Reveal({ children, style, className = '', delay = 0 }) {
   );
 }
 
-// --- Waveform logo ---
+// --- Waveform logo (high-res) ---
 function AmadeusLogo({ size = 48 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 48 48" fill="none">
-      <rect x="6" y="20" width="7" height="18" rx="3.5" fill="#b87aff" />
-      <rect x="17" y="8" width="7" height="32" rx="3.5" fill="#b87aff" />
-      <rect x="28" y="14" width="7" height="26" rx="3.5" fill="#b87aff" />
-      <circle cx="42" cy="16" r="4" fill="#b87aff" />
+    <svg width={size} height={size} viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="10" y="38" width="18" height="72" rx="9" fill="#b87aff" />
+      <rect x="38" y="10" width="18" height="100" rx="9" fill="#b87aff" />
+      <rect x="66" y="28" width="18" height="82" rx="9" fill="#b87aff" />
+      <circle cx="100" cy="38" r="11" fill="#b87aff" />
     </svg>
   );
 }
@@ -69,7 +69,6 @@ const sectionHeading = {
   marginBottom: 20,
 };
 
-const MOZART_IMG = 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Wolfgang-amadeus-mozart_1.jpg/440px-Wolfgang-amadeus-mozart_1.jpg';
 
 // ════════════════════════════════════════════════════════
 // HERO
@@ -121,48 +120,81 @@ function HeroSection({ onEnter }) {
           opacity,
         }}
       >
-        {/* Mozart portrait */}
+        {/* Orbital logo emblem */}
         <motion.div
-          style={{ position: 'relative', marginBottom: 28 }}
-          initial={{ opacity: 0, scale: 0.85 }}
+          style={{ position: 'relative', width: 160, height: 160, marginBottom: 32 }}
+          initial={{ opacity: 0, scale: 0.7 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 1, ease: [0.25, 0.4, 0.25, 1] }}
         >
-          <div style={{
-            width: 130, height: 130, borderRadius: '50%', overflow: 'hidden',
-            border: '2px solid rgba(184,122,255,0.35)',
-            boxShadow: '0 0 80px rgba(184,122,255,0.2), inset 0 0 40px rgba(0,0,0,0.6)',
-          }}>
-            <img
-              src={MOZART_IMG} alt=""
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              crossOrigin="anonymous" loading="eager"
-            />
-          </div>
+          {/* Outer orbiting ring */}
           <motion.div
             style={{
-              position: 'absolute', inset: -6, borderRadius: '50%',
+              position: 'absolute', inset: -12, borderRadius: '50%',
+              border: '1px solid rgba(184,122,255,0.12)',
+            }}
+            animate={{ rotate: 360 }}
+            transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+          >
+            <div style={{
+              position: 'absolute', top: -3, left: '50%', marginLeft: -3,
+              width: 6, height: 6, borderRadius: '50%',
+              background: '#b87aff', boxShadow: '0 0 12px #b87aff',
+            }} />
+          </motion.div>
+
+          {/* Middle pulsing ring */}
+          <motion.div
+            style={{
+              position: 'absolute', inset: 0, borderRadius: '50%',
+              border: '1.5px solid rgba(184,122,255,0.25)',
+            }}
+            animate={{
+              scale: [1, 1.06, 1],
+              opacity: [0.5, 1, 0.5],
+            }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+          />
+
+          {/* Inner ring */}
+          <motion.div
+            style={{
+              position: 'absolute', inset: 16, borderRadius: '50%',
               border: '1px solid rgba(184,122,255,0.15)',
+            }}
+            animate={{ rotate: -360 }}
+            transition={{ duration: 30, repeat: Infinity, ease: 'linear' }}
+          >
+            <div style={{
+              position: 'absolute', bottom: -2, left: '50%', marginLeft: -2,
+              width: 4, height: 4, borderRadius: '50%',
+              background: 'rgba(184,122,255,0.6)', boxShadow: '0 0 8px rgba(184,122,255,0.4)',
+            }} />
+          </motion.div>
+
+          {/* Center glow */}
+          <motion.div
+            style={{
+              position: 'absolute', inset: 30, borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(184,122,255,0.08) 0%, transparent 70%)',
             }}
             animate={{
               boxShadow: [
-                '0 0 20px rgba(184,122,255,0.1)',
-                '0 0 50px rgba(184,122,255,0.25)',
-                '0 0 20px rgba(184,122,255,0.1)',
+                '0 0 30px rgba(184,122,255,0.1)',
+                '0 0 60px rgba(184,122,255,0.25)',
+                '0 0 30px rgba(184,122,255,0.1)',
               ],
             }}
             transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
           />
-        </motion.div>
 
-        {/* Logo */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.3 }}
-          style={{ marginBottom: 12 }}
-        >
-          <AmadeusLogo size={48} />
+          {/* Logo centered */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <AmadeusLogo size={52} />
+          </div>
         </motion.div>
 
         {/* Title */}
