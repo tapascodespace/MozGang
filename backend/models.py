@@ -10,7 +10,11 @@ class CreativeBrief(BaseModel):
 
 class SectionUpdate(BaseModel):
     section_type: Optional[str] = None
+    scene_type: Optional[str] = None
     emotional_tone: Optional[str] = None
+    pacing: Optional[str] = None
+    energy_level: Optional[str] = None
+    suggested_music_style: Optional[str] = None
 
 
 class MergeRequest(BaseModel):

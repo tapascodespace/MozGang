@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
@@ -10,6 +11,7 @@ from services.analysis_service import (
     analyze_video_with_preanalysis,
     suggest_music_style
 )
+from services.music_service import generate_music_for_section
 
 logger = logging.getLogger("scoreflow.projects")
 
@@ -217,7 +219,7 @@ async def _background_pre_analyze(clips: list, project_id: str, vibe: str = None
 
 
 @router.post("/projects/{project_id}/brief")
-async def submit_brief(project_id: str, brief: CreativeBrief):
+async def submit_brief(project_id: str, brief: CreativeBrief, background_tasks: BackgroundTasks):
     """Submit creative brief and trigger analysis pipeline (PRD Section 8)."""
     logger.info(f"[BRIEF] ========== Submitting brief for project {project_id[:8]}... ==========")
     logger.info(f"[BRIEF] Energy: {brief.overall_energy}")
@@ -315,6 +317,16 @@ async def submit_brief(project_id: str, brief: CreativeBrief):
     sections = _store_analysis_sections(project_id, clips, analysis_result)
 
     logger.info(f"[BRIEF] ========== Brief complete: {len(sections)} sections created ({analysis_result.analysis_mode} mode) ==========")
+
+    # Auto-generate music for all sections in the background
+    logger.info(f"[BRIEF] Auto-starting music generation for {len(sections)} sections")
+    background_tasks.add_task(
+        _background_generate_all_sections,
+        sections=sections,
+        brief=brief_dict,
+        project_id=project_id,
+    )
+
     return {"sections": sections, "total_duration": total_duration, "analysis_mode": analysis_result.analysis_mode}
 
 
@@ -399,3 +411,68 @@ def _store_analysis_sections(project_id: str, clips: list, analysis_result) -> l
         )
 
     return sections
+
+
+async def _background_generate_all_sections(
+    sections: list,
+    brief: dict,
+    project_id: str,
+):
+    """
+    Background task to auto-generate music for all sections after brief submission.
+    Generates sequentially so each section's prompt can reference neighbors.
+    """
+    logger.info(f"[AUTO-GEN] ========== Starting auto-generation for {len(sections)} sections ==========")
+
+    # Sort by section_order to process in order
+    sorted_sections = sorted(sections, key=lambda s: s.get("section_order", 0))
+
+    for i, section in enumerate(sorted_sections):
+        section_id = section["id"]
+        prev_section = sorted_sections[i - 1] if i > 0 else None
+        next_section = sorted_sections[i + 1] if i < len(sorted_sections) - 1 else None
+
+        try:
+            # Mark as GENERATING
+            supabase.table("sections").update({
+                "music_status": "GENERATING"
+            }).eq("id", section_id).execute()
+
+            logger.info(
+                f"[AUTO-GEN] Generating section {i + 1}/{len(sorted_sections)}: "
+                f"{section.get('section_type', '?')} ({section.get('duration', 0):.1f}s)"
+            )
+
+            track = await generate_music_for_section(
+                section, brief, project_id,
+                prev_section=prev_section,
+                next_section=next_section,
+            )
+
+            # Insert track record
+            track_data = {
+                "section_id": section_id,
+                "storage_path": track.storage_path,
+                "stream_url": track.stream_url,
+                "duration": track.duration,
+                "generation_prompt": track.generation_prompt,
+                "trimmed_to_fit": track.trimmed_to_fit,
+                "is_discarded": False,
+            }
+            supabase.table("tracks").insert(track_data).execute()
+
+            # Mark as READY
+            supabase.table("sections").update({
+                "music_status": "READY"
+            }).eq("id", section_id).execute()
+
+            logger.info(f"[AUTO-GEN] ✓ Section {i + 1}/{len(sorted_sections)} complete")
+
+        except Exception as e:
+            logger.error(f"[AUTO-GEN] ✗ Section {section_id[:8]} failed: {e}")
+            supabase.table("sections").update({
+                "music_status": "FAILED"
+            }).eq("id", section_id).execute()
+
+    logger.info(f"[AUTO-GEN] ========== Auto-generation finished ==========")
+

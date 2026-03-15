@@ -25,8 +25,16 @@ async def update_section(project_id: str, section_id: str, body: SectionUpdate):
     update_data = {}
     if body.section_type is not None:
         update_data["section_type"] = body.section_type
+    if body.scene_type is not None:
+        update_data["scene_type"] = body.scene_type
     if body.emotional_tone is not None:
         update_data["emotional_tone"] = body.emotional_tone
+    if body.pacing is not None:
+        update_data["pacing"] = body.pacing
+    if body.energy_level is not None:
+        update_data["energy_level"] = body.energy_level
+    if body.suggested_music_style is not None:
+        update_data["suggested_music_style"] = body.suggested_music_style
 
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -65,6 +73,9 @@ async def generate_music(
         "references_text": project.get("references_text", ""),
     }
 
+    # Fetch neighbor sections for transition context
+    prev_section, next_section = _get_neighbor_sections(project_id, section)
+
     # Update status to GENERATING
     supabase.table("sections").update({
         "music_status": "GENERATING"
@@ -78,7 +89,9 @@ async def generate_music(
         section=section,
         brief=brief,
         project_id=project_id,
-        section_id=section_id
+        section_id=section_id,
+        prev_section=prev_section,
+        next_section=next_section,
     )
 
     return {"status": "generating", "message": "Music generation started"}
@@ -88,14 +101,20 @@ async def _background_generate(
     section: dict,
     brief: dict,
     project_id: str,
-    section_id: str
+    section_id: str,
+    prev_section: dict = None,
+    next_section: dict = None,
 ):
     """Background task to generate music and update database."""
     try:
         logger.info(f"[BACKGROUND] Generating music for section {section_id[:8]}")
 
-        # Generate music
-        track = await generate_music_for_section(section, brief, project_id)
+        # Generate music with transition context
+        track = await generate_music_for_section(
+            section, brief, project_id,
+            prev_section=prev_section,
+            next_section=next_section,
+        )
 
         # Insert track record
         track_data = {
@@ -174,13 +193,18 @@ async def regenerate_music(
     # Update section dict with new feedback for generation
     section["feedback_history"] = feedback_history
 
+    # Fetch neighbor sections for transition context
+    prev_section, next_section = _get_neighbor_sections(project_id, section)
+
     # Queue background task
     background_tasks.add_task(
         _background_generate,
         section=section,
         brief=brief,
         project_id=project_id,
-        section_id=section_id
+        section_id=section_id,
+        prev_section=prev_section,
+        next_section=next_section,
     )
 
     return {"status": "generating", "message": "Music regeneration started"}
@@ -492,6 +516,30 @@ def _reorder_sections(project_id: str):
     for i, s in enumerate(sections.data):
         if s["section_order"] != i:
             supabase.table("sections").update({"section_order": i}).eq("id", s["id"]).execute()
+
+
+def _get_neighbor_sections(project_id: str, section: dict) -> tuple:
+    """
+    Fetch the previous and next sections relative to the given section.
+
+    Returns:
+        (prev_section, next_section) - either can be None if at boundary
+    """
+    all_sections = supabase.table("sections").select("*").eq(
+        "project_id", project_id
+    ).order("section_order").execute().data
+
+    prev_section = None
+    next_section = None
+    current_order = section.get("section_order", 0)
+
+    for s in all_sections:
+        if s["section_order"] == current_order - 1:
+            prev_section = s
+        elif s["section_order"] == current_order + 1:
+            next_section = s
+
+    return prev_section, next_section
 
 
 def _update_adjacent_sections(project_id: str, section_id: str, original: dict,

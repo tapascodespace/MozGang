@@ -1946,6 +1946,13 @@ async def _analyze_single_section(
     avg_cuts = sum(w["cuts_per_second"] for w in cut_density) / len(cut_density) if cut_density else 0.5
     pacing_hint = _cuts_to_pacing(avg_cuts)
 
+    # Build scene type and section type lists from the canonical enums
+    scene_types_str = "|".join(SCENE_TYPES)
+    section_types_str = "|".join(SECTION_TYPES)
+    emotional_tones_str = "|".join(EMOTIONAL_TONES)
+    pacing_str = "|".join(PACING)
+    energy_str = "|".join(ENERGY_LEVELS)
+
     # Compact system prompt to save tokens
     system_prompt = f"""Analyze this video section for music scoring.
 
@@ -1954,7 +1961,7 @@ Section: {section.get('start_time', 0):.1f}s - {section.get('end_time', 0):.1f}s
 Pacing hint: {pacing_hint} ({avg_cuts:.2f} cuts/s)
 
 Return JSON only:
-{{"section_type":"<Hook|Intro|Setup|Build|Anticipation|Reveal|Reaction|Demonstration|Montage|Transition|Recap|Climax|Cooldown|Testimonial|CTA|Outro>","scene_type":"<Talking Head|Walk and Talk|Travel Montage|Product Showcase|Tutorial|Action Moment|Crowd/Event|Reaction Shot|B-Roll|Interview|Vlog/Casual|Gaming|Beauty/Fashion|Lifestyle|Food|Sports|Nature|Urban|Indoor|Outdoor>","emotional_tone":"<Energetic|Playful|Suspenseful|Inspirational|Dramatic|Emotional|Calm|Informative|Nostalgic|Mysterious|Triumphant|Melancholic|Confident|Humorous|Uplifting>","pacing":"<Very Slow|Slow|Medium|Fast|Very Fast>","energy_level":"<Very Low|Low|Medium Low|Medium|Medium High|High|Very High>","detected_theme":"<12 words max>","dominant_visual":"<8 words max>","suggested_music_style":"<20 words max>"}}"""
+{{"section_type":"<{section_types_str}>","scene_type":"<{scene_types_str}>","emotional_tone":"<{emotional_tones_str}>","pacing":"<{pacing_str}>","energy_level":"<{energy_str}>","detected_theme":"<12 words max>","dominant_visual":"<8 words max>","suggested_music_style":"<20 words max>"}}"""
 
     # Build messages with limited frames (max 6 for efficiency)
     messages = [{"role": "system", "content": system_prompt}]
@@ -2007,7 +2014,7 @@ Return JSON only:
                 result = await response.json()
 
         content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-        logger.debug(f"[REANALYZE] GPT-4o raw response: {content[:500]}...")
+        logger.info(f"[REANALYZE] GPT-4o raw response: {content[:500]}")
 
         # Parse JSON response
         content = content.strip()
@@ -2017,7 +2024,9 @@ Return JSON only:
                 content = match.group(0)
 
         section_data = json.loads(content)
+        logger.info(f"[REANALYZE] Parsed section data before validation: scene_type={section_data.get('scene_type')}, section_type={section_data.get('section_type')}, emotional_tone={section_data.get('emotional_tone')}")
         section_data = _validate_and_fix_section(section_data, 0)
+        logger.info(f"[REANALYZE] After validation: scene_type={section_data.get('scene_type')}, section_type={section_data.get('section_type')}")
 
         # Use computed cuts_per_second
         section_data["cuts_per_second"] = avg_cuts
@@ -2549,12 +2558,36 @@ def detect_video_structure_fast(
     video_structure = "Vlog"  # Default
     theme_summary = None  # Will be set based on detection
 
+    # Detect SFX-heavy transcripts: (waves crashing) (seagulls calling) etc.
+    # These indicate nature/scenic content with environmental sounds, not speech
+    sfx_markers = re.findall(r'\([^)]+\)', clean_transcript or "")
+    sfx_chars = sum(len(m) for m in sfx_markers)
+    speech_text = re.sub(r'\([^)]+\)', '', clean_transcript or "").strip()
+    speech_chars = len(speech_text)
+    is_sfx_heavy = sfx_chars > 0 and (sfx_chars > speech_chars or speech_chars < 30)
+
+    # Use speech-only text for transcript density to avoid SFX inflating the count
+    speech_density = speech_chars / total_video_duration if total_video_duration > 0 else 0
+
     # FIRST: Check shot patterns - many short shots at non-montage pacing = Scenic
     # This is the strongest signal and takes priority over keyword detection
     # because scenic videos may have light narration mentioning travel, etc.
     if has_many_short_shots and dominant_pacing in ("SLOW", "MEDIUM", "STATIC"):
         video_structure = "Scenic"
         theme_summary = "Scenic or visual content"
+    # SFX-heavy transcripts = nature/scenic (waves, birds, water sounds)
+    elif is_sfx_heavy:
+        video_structure = "Scenic"
+        # Build theme from SFX content
+        sfx_words = [m.strip("()").lower() for m in sfx_markers[:3]]
+        if sfx_words:
+            theme_summary = f"Scenic video with {', '.join(sfx_words)}"
+        else:
+            theme_summary = "Scenic or nature content"
+    # Check for nature/outdoor keywords
+    elif any(word in transcript_lower for word in ["ocean", "waves", "beach", "seagull", "nature", "sunset", "mountain", "forest", "lake", "waterfall"]):
+        video_structure = "Scenic"
+        theme_summary = "Nature or outdoor scenery"
     # Check for specific keywords
     elif any(word in transcript_lower for word in ["tutorial", "how to", "step by step", "let me show you"]):
         video_structure = "Tutorial"
@@ -2585,20 +2618,18 @@ def detect_video_structure_fast(
         theme_summary = "Fast-paced montage"
     elif dominant_pacing in ("SLOW", "STATIC"):
         # Slow/static pacing without many short shots
-        # Low transcript density = scenic, high transcript density = talking head
-        if transcript_density < 15:
+        # Use speech_density (not transcript_density) to avoid SFX inflation
+        if speech_density < 15:
             video_structure = "Scenic"
             theme_summary = "Scenic or visual content"
         elif dominant_pacing == "STATIC":
             video_structure = "Talking Head"
             theme_summary = "Talking head or presentation"
 
-    # If no specific theme detected, create a summary from clean transcript
-    if theme_summary is None and clean_transcript and len(clean_transcript) > 20:
-        # Take first ~60 characters, break at word boundary
-        summary = clean_transcript[:60]
-        if len(clean_transcript) > 60:
-            # Find last space to avoid cutting mid-word
+    # If no specific theme detected, create a summary from speech text (not raw transcript with SFX)
+    if theme_summary is None and speech_text and len(speech_text) > 20:
+        summary = speech_text[:60]
+        if len(speech_text) > 60:
             last_space = summary.rfind(' ')
             if last_space > 30:
                 summary = summary[:last_space]

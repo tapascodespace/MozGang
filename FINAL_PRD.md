@@ -328,7 +328,7 @@ GET    /api/projects/{id}                           Get project details
 POST   /api/projects/{id}/clips                     Upload clips (multipart)
 GET    /api/projects/{id}/clips                     Get all clips
 PUT    /api/projects/{id}/clips/reorder             Reorder clips
-POST   /api/projects/{id}/brief                     Submit brief + trigger analysis
+POST   /api/projects/{id}/brief                     Submit brief + trigger analysis + auto-generate all music
 PUT    /api/projects/{id}/brief                     Update brief (no auto-regen)
 GET    /api/projects/{id}/sections                  Get sections
 PUT    /api/projects/{id}/sections/{sid}            Update section_type / emotional_tone
@@ -522,9 +522,9 @@ POST https://api.elevenlabs.io/v1/sound-generation
 }
 ```
 
-**Prompt:**
+**Prompt (transition-aware):**
 ```python
-def build_music_prompt(section, brief):
+def build_music_prompt(section, brief, prev_section=None, next_section=None):
     parts = [
         brief.music_style_direction,
         brief.overall_energy,
@@ -536,8 +536,23 @@ def build_music_prompt(section, brief):
         parts.append(f"References: {brief.references_text}")
     if section.feedback_history:
         parts.append("User direction: " + ". ".join(section.feedback_history))
+    # Transition context for seamless section-to-section flow
+    if prev_section:
+        parts.append(f"Transition from previous section: {prev_section.emotional_tone} mood, "
+                      f"{prev_section.energy_level} energy, {prev_section.pacing} pacing. "
+                      f"Begin smoothly continuing from that feel.")
+    else:
+        parts.append("This is the opening section. Start with a natural musical intro.")
+    if next_section:
+        parts.append(f"Transition toward next section: {next_section.emotional_tone} mood, "
+                      f"{next_section.energy_level} energy, {next_section.pacing} pacing. "
+                      f"End by gradually shifting toward that feel.")
+    else:
+        parts.append("This is the final section. End with a natural musical outro or gentle fade.")
     return " ".join(parts)
 ```
+
+Neighbor sections (`prev_section`, `next_section`) are fetched from the database by `section_order`. This ensures each generated track transitions smoothly into and out of its neighbors. Applies to both initial generation and regeneration with feedback.
 
 **Long sections:** if `section.duration > 30`, split into ≤30s chunks, generate sequentially with the same prompt, concatenate with FFmpeg.
 
@@ -566,6 +581,21 @@ async def generate_with_retry(section):
 ```
 
 Status written to `sections.music_status`. Frontend updates via Realtime. Tracks appear one-by-one.
+
+### 8.8 Auto-Generation After Brief Submission
+
+When the brief is submitted (`POST /api/projects/{id}/brief`), music generation is automatically triggered for **all sections** — no manual "Generate" click needed.
+
+**Flow:**
+1. Brief submitted → analysis pipeline runs → sections stored in database
+2. `_background_generate_all_sections()` fires as a background task
+3. Sections processed sequentially in `section_order` with transition-aware prompts
+4. Each section: PENDING → GENERATING → READY (or FAILED)
+5. Frontend sees updates via Supabase Realtime — tracks appear one-by-one
+
+**Sequential processing** ensures each section's prompt includes correct neighbor context (previous and next section mood/energy/pacing) for smooth transitions.
+
+Users can still regenerate individual sections with feedback after auto-generation completes. Regeneration also includes neighbor context.
 
 ---
 
@@ -671,10 +701,10 @@ Build the full UI with mocked AI. Everything must look and feel real.
 2. Select a vibe (e.g., "Cinematic", "Energetic")
 3. AI recommends music style → confirm or tweak → "Score My Video →"
 4. Workspace: 3–5 AI-detected sections on timeline (scenic, montage, etc.)
-5. Click section → panel shows theme, tone, style
-6. Click "Generate ▶" → amber pulse → track appears
-7. Play → seamless clip transitions with synced music
-8. Type feedback → Regenerate → new track
+5. Music auto-generates for all sections — amber pulses → tracks appear one-by-one with smooth transitions
+6. Click section → panel shows theme, tone, style
+7. Play → seamless clip transitions with synced music flowing between sections
+8. Type feedback → Regenerate → new track (matches neighbors' mood/energy)
 9. Export → browser downloads MP4
 
 ---

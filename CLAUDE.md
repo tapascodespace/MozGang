@@ -98,9 +98,11 @@ Implemented in `backend/services/music_service.py`:
 - Queuing with semaphore + exponential backoff (PRD Section 8.7)
 - FFmpeg trimming to exact section duration
 - Long section handling (>30s split into chunks)
+- Transition-aware prompts: neighbor section mood/energy/pacing included for smooth transitions
+- Auto-generation: all sections generate automatically after brief submission
 - Frontend audio playback synced with video preview
 
-**Entry point:** `generate_music_for_section(section, brief, project_id) -> GeneratedTrack`
+**Entry point:** `generate_music_for_section(section, brief, project_id, prev_section=None, next_section=None) -> GeneratedTrack`
 
 ---
 
@@ -131,7 +133,7 @@ AI must return values from these exact lists. No other values are valid.
 ## Music Prompt Format (PRD Section 8.6)
 
 ```python
-def build_music_prompt(section, brief):
+def build_music_prompt(section, brief, prev_section=None, next_section=None):
     parts = [
         brief.music_style_direction,
         brief.overall_energy,
@@ -143,6 +145,19 @@ def build_music_prompt(section, brief):
         parts.append(f"References: {brief.references_text}")
     if section.feedback_history:
         parts.append("User direction: " + ". ".join(section.feedback_history))
+    # Transition context
+    if prev_section:
+        parts.append(f"Transition from previous section: {prev_section.emotional_tone} mood, "
+                      f"{prev_section.energy_level} energy, {prev_section.pacing} pacing. "
+                      f"Begin smoothly continuing from that feel.")
+    else:
+        parts.append("This is the opening section. Start with a natural musical intro.")
+    if next_section:
+        parts.append(f"Transition toward next section: {next_section.emotional_tone} mood, "
+                      f"{next_section.energy_level} energy, {next_section.pacing} pacing. "
+                      f"End by gradually shifting toward that feel.")
+    else:
+        parts.append("This is the final section. End with a natural musical outro or gentle fade.")
     return " ".join(parts)
 ```
 
@@ -165,7 +180,7 @@ PUT    /projects/{id}/clips/reorder        Reorder clips
 GET    /projects/{id}/clips/{cid}/stream   Stream clip URL
 
 # Brief
-POST   /projects/{id}/brief                Submit brief + trigger analysis (uses pre-analysis if available)
+POST   /projects/{id}/brief                Submit brief + trigger analysis + auto-generate all music
 PUT    /projects/{id}/brief                Update brief (no auto-regen)
 
 # Sections
@@ -351,3 +366,32 @@ Component: `frontend/src/components/PreviewPlayer.jsx`
 - Event handlers (`handleTimeUpdate`, `handleEnded`) check `e.target` against active element to ignore events from the preload element
 - `handleLoadedMetadata` correctly stores clip duration for both active and preloaded clips
 - Falls back to src-switch on seeks to non-preloaded clips (rare)
+
+---
+
+## Transition-Aware Music Generation & Auto-Generation
+
+### Transition-Aware Prompts
+Music generation prompts now include context about neighboring sections for smooth transitions:
+
+- **Previous section context**: Mood, energy, pacing of the previous section → prompt says "Begin smoothly continuing from that feel"
+- **Next section context**: Mood, energy, pacing of the next section → prompt says "End by gradually shifting toward that feel"
+- **First section**: "Start with a natural musical intro" (no previous)
+- **Last section**: "End with a natural musical outro or gentle fade" (no next)
+
+This applies to both initial generation and regeneration (with feedback).
+
+### Auto-Generation After Brief Submission
+When the brief is submitted (`POST /projects/{id}/brief`), music generation automatically starts for ALL sections:
+
+- `_background_generate_all_sections()` runs as a background task after sections are stored
+- Sections are processed sequentially (in `section_order`) so each gets proper neighbor context
+- Each section transitions through: PENDING → GENERATING → READY/FAILED
+- Frontend sees status updates via Supabase Realtime — tracks appear one-by-one
+- No manual "Generate" click needed; users can still regenerate individual sections with feedback
+
+### Implementation Files
+- `backend/services/analysis_types.py`: `build_music_prompt()` accepts `prev_section`/`next_section`
+- `backend/services/music_service.py`: `generate_music_for_section()` passes neighbor context through
+- `backend/routes/sections.py`: `_get_neighbor_sections()` fetches adjacent sections by `section_order`; generate/regenerate endpoints pass neighbors
+- `backend/routes/projects.py`: `_background_generate_all_sections()` auto-generates all sections after brief

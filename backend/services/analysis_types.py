@@ -122,10 +122,21 @@ def _float_to_energy_level(energy: float | str) -> str:
         return "Very High"
 
 
-def build_music_prompt(section: dict, brief: dict) -> str:
+def build_music_prompt(
+    section: dict,
+    brief: dict,
+    prev_section: dict = None,
+    next_section: dict = None,
+) -> str:
     """
     Build music generation prompt from section analysis and user brief.
-    Matches exactly PRD Section 8.6.
+    Matches PRD Section 8.6 with transition-aware context.
+
+    Args:
+        section: Current section data
+        brief: User's creative brief
+        prev_section: Previous section (for smooth transition from)
+        next_section: Next section (for smooth transition towards)
     """
     energy_level = _float_to_energy_level(section.get('energy_level', 0.5))
 
@@ -143,7 +154,34 @@ def build_music_prompt(section: dict, brief: dict) -> str:
     if feedback_history:
         parts.append("User direction: " + ". ".join(feedback_history))
 
-    return " ".join(filter(None, parts))
+    # Transition context for seamless section-to-section flow
+    if prev_section:
+        prev_energy = _float_to_energy_level(prev_section.get('energy_level', 0.5))
+        parts.append(
+            f"Transition from previous section: {prev_section.get('emotional_tone', '')} mood, "
+            f"{prev_energy} energy, {prev_section.get('pacing', 'Medium')} pacing. "
+            f"Begin smoothly continuing from that feel."
+        )
+    else:
+        parts.append("This is the opening section. Start with a natural musical intro.")
+
+    if next_section:
+        next_energy = _float_to_energy_level(next_section.get('energy_level', 0.5))
+        parts.append(
+            f"Transition toward next section: {next_section.get('emotional_tone', '')} mood, "
+            f"{next_energy} energy, {next_section.get('pacing', 'Medium')} pacing. "
+            f"End by gradually shifting toward that feel."
+        )
+    else:
+        parts.append("This is the final section. End with a natural musical outro or gentle fade.")
+
+    prompt = " ".join(filter(None, parts))
+
+    # ElevenLabs Sound Generation API has a 450 character limit
+    if len(prompt) > 450:
+        prompt = prompt[:447] + "..."
+
+    return prompt
 
 
 class GeneratedTrack(BaseModel):

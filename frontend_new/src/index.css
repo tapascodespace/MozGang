@@ -1,0 +1,165 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 0 0% 7%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 271 70% 68%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 11%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 100% / 0.45;
+
+    --accent: 271 70% 68%;
+    --accent-foreground: 0 0% 100%;
+    --accent-dim: 271 70% 68% / 0.12;
+
+    --destructive: 0 86% 71%;
+    --destructive-foreground: 0 0% 100%;
+
+    --amber: 36 90% 55%;
+
+    --border: 0 0% 100% / 0.07;
+    --input: 0 0% 100% / 0.07;
+    --ring: 271 70% 68%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 0 0% 7%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 271 70% 68%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 11%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 0 0% 100% / 0.07;
+    --sidebar-ring: 271 70% 68%;
+
+    /* Section type colors (extended for all backend section types) */
+    --section-hook: 0 70% 70%;
+    --section-intro: 214 60% 57%;
+    --section-setup: 180 50% 50%;
+    --section-build: 36 90% 55%;
+    --section-anticipation: 45 80% 55%;
+    --section-reveal: 300 60% 60%;
+    --section-climax: 0 70% 50%;
+    --section-cooldown: 271 70% 68%;
+    --section-montage: 160 60% 50%;
+    --section-transition: 200 40% 50%;
+    --section-outro: 240 40% 55%;
+    --section-cta: 120 60% 45%;
+    --section-scenic: 170 50% 55%;
+    --section-reaction: 330 60% 60%;
+    --section-demonstration: 50 70% 50%;
+    --section-testimonial: 280 50% 55%;
+    --section-recap: 220 50% 55%;
+    --section-pending: 0 0% 14%;
+    --section-generating: 36 90% 55%;
+
+    --glow-primary: 271 70% 68% / 0.12;
+    --glow-accent: 271 70% 68% / 0.06;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  h1, h2, h3 {
+    font-family: 'DM Serif Display', serif;
+  }
+}
+
+@layer components {
+  .chip {
+    @apply flex items-center gap-2.5 px-5 py-3 rounded-full border border-border bg-card cursor-pointer transition-all duration-200 select-none text-sm font-medium;
+  }
+
+  .chip:hover {
+    border-color: hsl(271 70% 68% / 0.4);
+    background: hsl(0 0% 10%);
+  }
+
+  .chip-selected {
+    border-color: hsl(var(--accent));
+    background: hsl(var(--accent-dim));
+    color: hsl(var(--foreground));
+  }
+
+  /* Drop zone (intake) */
+  .drop-zone-border {
+    @apply border-2 border-dashed border-border rounded-2xl transition-all duration-300;
+  }
+
+  .drop-zone-active {
+    border-color: hsl(var(--accent));
+    background: hsl(var(--accent-dim));
+  }
+
+  .scoreflow-glow {
+    box-shadow: 0 0 40px hsl(var(--glow-primary)), 0 0 80px hsl(var(--glow-accent));
+  }
+
+  .section-block {
+    @apply rounded-xl px-3 py-2 text-xs font-medium cursor-pointer transition-all duration-200 select-none;
+  }
+
+  .section-block:hover {
+    transform: scale(1.02);
+    filter: brightness(1.15);
+  }
+
+  .music-pulse {
+    animation: musicPulse 1.5s ease-in-out infinite;
+  }
+
+  .timeline-track {
+    @apply rounded-xl border border-border transition-all duration-300;
+  }
+
+  .playhead {
+    @apply absolute top-0 bottom-0 w-px z-30 pointer-events-none;
+    background: hsl(var(--foreground) / 0.5);
+  }
+}
+
+@keyframes musicPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes waveform {
+  0%, 100% { height: 30%; }
+  25% { height: 80%; }
+  50% { height: 50%; }
+  75% { height: 90%; }
+}

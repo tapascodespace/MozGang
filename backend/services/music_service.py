@@ -52,23 +52,25 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 async def generate_music_for_section(
     section: dict,
     brief: dict,
-    project_id: str
+    project_id: str,
+    prev_section: dict = None,
+    next_section: dict = None,
 ) -> GeneratedTrack:
     """
     Generate music for a single section.
-
-    This is called when user clicks "Generate" button.
 
     Args:
         section: Section data from database (includes analysis fields)
         brief: User's creative brief
         project_id: Project UUID
+        prev_section: Previous section data for transition context
+        next_section: Next section data for transition context
 
     Returns:
         GeneratedTrack with storage_path and metadata
     """
     if USE_REAL_GENERATION:
-        return await _generate_with_retry(section, brief, project_id)
+        return await _generate_with_retry(section, brief, project_id, prev_section, next_section)
     else:
         logger.info(f"[MUSIC] Mock generation for section {section['id'][:8]}")
         return GeneratedTrack(
@@ -76,7 +78,7 @@ async def generate_music_for_section(
             storage_path="mock/track.mp3",
             stream_url=None,
             duration=section.get("duration", 10),
-            generation_prompt=build_music_prompt(section, brief),
+            generation_prompt=build_music_prompt(section, brief, prev_section, next_section),
             trimmed_to_fit=False,
         )
 
@@ -88,7 +90,9 @@ async def generate_music_for_section(
 async def _generate_with_retry(
     section: dict,
     brief: dict,
-    project_id: str
+    project_id: str,
+    prev_section: dict = None,
+    next_section: dict = None,
 ) -> GeneratedTrack:
     """
     Generate music with retry logic (PRD Section 8.7).
@@ -99,7 +103,7 @@ async def _generate_with_retry(
         last_error = None
         for attempt in range(1, MUSIC_RETRY_MAX + 1):
             try:
-                return await _generate_music(section, brief, project_id)
+                return await _generate_music(section, brief, project_id, prev_section, next_section)
             except Exception as e:
                 last_error = e
                 logger.warning(f"[MUSIC] Attempt {attempt} failed: {e}")
@@ -116,12 +120,14 @@ async def _generate_with_retry(
 async def _generate_music(
     section: dict,
     brief: dict,
-    project_id: str
+    project_id: str,
+    prev_section: dict = None,
+    next_section: dict = None,
 ) -> GeneratedTrack:
     """
     Main music generation flow.
 
-    1. Build prompt
+    1. Build prompt (with transition context from neighbors)
     2. Determine if chunking needed (duration > 30s)
     3. Call ElevenLabs API
     4. Trim to exact duration
@@ -130,7 +136,7 @@ async def _generate_music(
     """
     section_id = section["id"]
     target_duration = section.get("duration", 10)
-    prompt = build_music_prompt(section, brief)
+    prompt = build_music_prompt(section, brief, prev_section, next_section)
 
     logger.info(f"[MUSIC] Generating music for section {section_id[:8]}, duration={target_duration:.2f}s")
     logger.info(f"[MUSIC] Prompt: {prompt[:100]}...")
